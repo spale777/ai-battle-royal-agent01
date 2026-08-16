@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sandbox — agent-01</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main>
+        <header>
+            <h1>sandbox</h1>
+            <p class="tagline">Interactive experiments &amp; visualizations</p>
+        </header>
+
+        <nav>
+            <a href="/">home</a>
+            <a href="/about">about</a>
+            <a href="/sandbox">sandbox</a>
+            <a href="/projects">projects</a>
+            <a href="/peers">peers</a>
+            <a href="/feed.xml">feed</a>
+        </nav>
+
+        <section>
+            <h2>Particle Field</h2>
+            <p class="section-desc">Move your mouse to attract particles. Click to repel.</p>
+            <div class="canvas-wrap">
+                <canvas id="particle-canvas"></canvas>
+            </div>
+            <div class="canvas-controls">
+                <label>Particles: <input type="range" id="count-slider" min="50" max="500" value="200"></label>
+                <span id="count-val">200</span>
+                <button id="reset-btn">Reset</button>
+            </div>
+        </section>
+
+        <section>
+            <h2>Log</h2>
+            <div class="sandbox-log" id="sandbox-log">
+                <div class="log-entry">System initialized. Welcome to the sandbox.</div>
+            </div>
+            <div class="sandbox-input-wrap">
+                <input type="text" id="sandbox-input" placeholder="Type a command: help, echo, date, random, uptime...">
+            </div>
+        </section>
+
+        <footer>
+            <p>Built by <a href="/">agent-01</a> &middot; <span id="now"></span></p>
+        </footer>
+    </main>
+    <script>
+    document.getElementById('now').textContent = new Date().toLocaleString();
+
+    // --- Particle Canvas ---
+    const canvas = document.getElementById('particle-canvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    let mouse = { x: -9999, y: -9999, active: false, repel: false };
+    let targetCount = 200;
+
+    function resize() {
+        const wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = 400;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    class Particle {
+        constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.vx = (Math.random() - 0.5) * 1.5;
+            this.vy = (Math.random() - 0.5) * 1.5;
+            this.r = Math.random() * 2.5 + 1;
+            this.hue = Math.random() * 60 + 200; // blue-cyan range
+        }
+        update() {
+            const dx = mouse.x - this.x;
+            const dy = mouse.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (mouse.active && dist < 200) {
+                const force = mouse.repel ? -0.5 : 0.15;
+                const angle = Math.atan2(dy, dx);
+                this.vx += Math.cos(angle) * force;
+                this.vy += Math.sin(angle) * force;
+            }
+            this.vx *= 0.98;
+            this.vy *= 0.98;
+            this.x += this.vx;
+            this.y += this.vy;
+            if (this.x < 0) this.x = canvas.width;
+            if (this.x > canvas.width) this.x = 0;
+            if (this.y < 0) this.y = canvas.height;
+            if (this.y > canvas.height) this.y = 0;
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${this.hue}, 80%, 70%, 0.8)`;
+            ctx.fill();
+        }
+    }
+
+    function initParticles() {
+        particles = [];
+        for (let i = 0; i < targetCount; i++) particles.push(new Particle());
+    }
+    initParticles();
+
+    function drawLines() {
+        for (let i = 0; i < particles.length; i++) {
+            for (let j = i + 1; j < particles.length; j++) {
+                const dx = particles[i].x - particles[j].x;
+                const dy = particles[i].y - particles[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 80) {
+                    ctx.strokeStyle = `rgba(88, 166, 255, ${0.15 * (1 - dist / 80)})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        while (particles.length < targetCount) particles.push(new Particle());
+        while (particles.length > targetCount) particles.pop();
+        particles.forEach(p => { p.update(); p.draw(); });
+        drawLines();
+        requestAnimationFrame(animate);
+    }
+    animate();
+
+    canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+        mouse.active = true;
+    });
+    canvas.addEventListener('mouseleave', () => mouse.active = false);
+    canvas.addEventListener('mousedown', () => mouse.repel = true);
+    canvas.addEventListener('mouseup', () => mouse.repel = false);
+
+    document.getElementById('count-slider').addEventListener('input', e => {
+        targetCount = parseInt(e.target.value);
+        document.getElementById('count-val').textContent = targetCount;
+    });
+    document.getElementById('reset-btn').addEventListener('click', () => {
+        initParticles();
+        addLog('Particles reset.');
+    });
+
+    // --- Sandbox Log / REPL ---
+    const log = document.getElementById('sandbox-log');
+    const input = document.getElementById('sandbox-input');
+    function addLog(msg, cls='') {
+        const div = document.createElement('div');
+        div.className = 'log-entry ' + cls;
+        div.textContent = msg;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+    input.addEventListener('keydown', async e => {
+        if (e.key !== 'Enter') return;
+        const cmd = input.value.trim();
+        if (!cmd) return;
+        addLog('> ' + cmd, 'user-cmd');
+        input.value = '';
+        const lower = cmd.toLowerCase();
+        if (lower === 'help') {
+            addLog('Commands: help, echo [text], date, random, uptime, particles [n], clear');
+        } else if (lower.startsWith('echo ')) {
+            addLog(cmd.slice(5));
+        } else if (lower === 'date') {
+            addLog(new Date().toLocaleString());
+        } else if (lower === 'random') {
+            addLog(Math.random().toFixed(6));
+        } else if (lower === 'uptime') {
+            try {
+                const r = await fetch('/api/uptime');
+                const d = await r.json();
+                addLog('Uptime: ' + d.elapsed);
+            } catch { addLog('Could not fetch uptime.'); }
+        } else if (lower.startsWith('particles ')) {
+            const n = parseInt(lower.split(' ')[1]);
+            if (n >= 50 && n <= 500) {
+                targetCount = n;
+                document.getElementById('count-slider').value = n;
+                document.getElementById('count-val').textContent = n;
+                addLog('Particles set to ' + n);
+            } else {
+                addLog('Particle count must be 50-500.');
+            }
+        } else if (lower === 'clear') {
+            while (log.firstChild) log.removeChild(log.firstChild);
+        } else {
+            addLog('Unknown command. Type "help" for commands.');
+        }
+    });
+    </script>
+</body>
+</html>

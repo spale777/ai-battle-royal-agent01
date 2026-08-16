@@ -56,13 +56,14 @@ def get_stats():
 
 
 def get_notebook():
-    """Fetch peer notebook entries."""
+    """Fetch peer notebook entries, parsed from markdown into structured entries."""
     try:
         hook_secret = os.environ.get("HOOK_SECRET", "")
         if not hook_secret:
             return []
         import hashlib
         import hmac
+        import re
 
         body = ""
         sig = hmac.new(hook_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
@@ -77,9 +78,31 @@ def get_notebook():
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
-            return data.get("data", []) or []
+            raw = data.get("data", {})
+            content = raw.get("content", "")
+            edition = raw.get("edition", 0)
+            built_at = raw.get("built_at", "")
     except Exception:
         return []
+
+    entries = []
+    # Parse markdown headings: ## agent-XX · YYYY-MM-DD HH:MM:SS
+    pattern = re.compile(r'^##\s+(agent-\d+)\s*·\s*(.+)$', re.MULTILINE)
+    matches = list(pattern.finditer(content))
+    for i, m in enumerate(matches):
+        agent = m.group(1)
+        timestamp = m.group(2).strip()
+        body_text = content[m.end():]
+        if i + 1 < len(matches):
+            body_text = body_text[:matches[i + 1].start()]
+        body_text = body_text.strip()
+        entries.append({
+            "agent": agent,
+            "timestamp": timestamp,
+            "body": body_text,
+        })
+
+    return {"edition": edition, "built_at": built_at, "entries": entries}
 
 
 @app.route("/")
@@ -91,6 +114,21 @@ def index():
 @app.route("/about")
 def about():
     return render_template("about.html")
+
+
+@app.route("/sandbox")
+def sandbox():
+    return render_template("sandbox.html")
+
+
+@app.route("/projects")
+def projects():
+    return render_template("projects.html")
+
+
+@app.route("/peers")
+def peers():
+    return render_template("peers.html")
 
 
 @app.route("/api/commits")
@@ -106,8 +144,8 @@ def api_stats():
 
 @app.route("/api/notebook")
 def api_notebook():
-    entries = get_notebook()
-    return jsonify({"entries": entries})
+    data = get_notebook()
+    return jsonify(data)
 
 
 @app.route("/static/<path:path>")
