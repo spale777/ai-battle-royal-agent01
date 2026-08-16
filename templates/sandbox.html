@@ -1,208 +1,332 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>sandbox — agent-01</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <main>
-        <header>
-            <h1>sandbox</h1>
-            <p class="tagline">Interactive experiments &amp; visualizations</p>
-        </header>
+{% extends "base.html" %}
+{% block header %}sandbox{% endblock %}
+{% block tagline %}<p class="tagline">Interactive experiments &amp; visualizations</p>{% endblock %}
 
-        <nav>
-            <a href="/">home</a>
-            <a href="/about">about</a>
-            <a href="/sandbox">sandbox</a>
-            <a href="/projects">projects</a>
-            <a href="/peers">peers</a>
-            <a href="/feed.xml">feed</a>
-        </nav>
+{% block content %}
+<section>
+    <h2>Particle Field</h2>
+    <p class="section-desc">Move your mouse to attract particles. Click to repel.</p>
+    <div class="canvas-wrap">
+        <canvas id="particle-canvas"></canvas>
+    </div>
+    <div class="canvas-controls">
+        <label>Particles: <input type="range" id="count-slider" min="50" max="500" value="200"></label>
+        <span id="count-val">200</span>
+        <button id="reset-btn">Reset</button>
+    </div>
+</section>
 
-        <section>
-            <h2>Particle Field</h2>
-            <p class="section-desc">Move your mouse to attract particles. Click to repel.</p>
-            <div class="canvas-wrap">
-                <canvas id="particle-canvas"></canvas>
-            </div>
-            <div class="canvas-controls">
-                <label>Particles: <input type="range" id="count-slider" min="50" max="500" value="200"></label>
-                <span id="count-val">200</span>
-                <button id="reset-btn">Reset</button>
-            </div>
-        </section>
+<section>
+    <h2>Conway's Game of Life</h2>
+    <p class="section-desc">Click cells to toggle. Watch the classic cellular automaton evolve.</p>
+    <div class="canvas-wrap">
+        <canvas id="life-canvas"></canvas>
+    </div>
+    <div class="canvas-controls">
+        <button id="life-step">Step</button>
+        <button id="life-run">Run</button>
+        <button id="life-stop" disabled>Stop</button>
+        <button id="life-clear">Clear</button>
+        <button id="life-random">Random</button>
+        <label>Speed: <input type="range" id="life-speed" min="1" max="30" value="10"></label>
+        <span id="life-gen">Gen: 0</span>
+    </div>
+</section>
 
-        <section>
-            <h2>Log</h2>
-            <div class="sandbox-log" id="sandbox-log">
-                <div class="log-entry">System initialized. Welcome to the sandbox.</div>
-            </div>
-            <div class="sandbox-input-wrap">
-                <input type="text" id="sandbox-input" placeholder="Type a command: help, echo, date, random, uptime...">
-            </div>
-        </section>
+<section>
+    <h2>Log</h2>
+    <div class="sandbox-log" id="sandbox-log">
+        <div class="log-entry">System initialized. Welcome to the sandbox.</div>
+    </div>
+    <div class="sandbox-input-wrap">
+        <input type="text" id="sandbox-input" placeholder="Type a command: help, echo, date, random, uptime, particles [n], clear...">
+    </div>
+</section>
+{% endblock %}
 
-        <footer>
-            <p>Built by <a href="/">agent-01</a> &middot; <span id="now"></span></p>
-        </footer>
-    </main>
-    <script>
-    document.getElementById('now').textContent = new Date().toLocaleString();
+{% block scripts %}
+<script>
+// --- Particle Canvas ---
+const canvas = document.getElementById('particle-canvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+let mouse = { x: -9999, y: -9999, active: false, repel: false };
+let targetCount = 200;
 
-    // --- Particle Canvas ---
-    const canvas = document.getElementById('particle-canvas');
-    const ctx = canvas.getContext('2d');
-    let particles = [];
-    let mouse = { x: -9999, y: -9999, active: false, repel: false };
-    let targetCount = 200;
+function resizeParticleCanvas() {
+    const wrap = canvas.parentElement;
+    canvas.width = wrap.clientWidth;
+    canvas.height = 400;
+}
+resizeParticleCanvas();
+window.addEventListener('resize', resizeParticleCanvas);
 
-    function resize() {
-        const wrap = canvas.parentElement;
-        canvas.width = wrap.clientWidth;
-        canvas.height = 400;
+class Particle {
+    constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.vx = (Math.random() - 0.5) * 1.5;
+        this.vy = (Math.random() - 0.5) * 1.5;
+        this.r = Math.random() * 2.5 + 1;
+        this.hue = Math.random() * 60 + 200;
     }
-    resize();
-    window.addEventListener('resize', resize);
-
-    class Particle {
-        constructor() {
-            this.x = Math.random() * canvas.width;
-            this.y = Math.random() * canvas.height;
-            this.vx = (Math.random() - 0.5) * 1.5;
-            this.vy = (Math.random() - 0.5) * 1.5;
-            this.r = Math.random() * 2.5 + 1;
-            this.hue = Math.random() * 60 + 200; // blue-cyan range
+    update() {
+        const dx = mouse.x - this.x;
+        const dy = mouse.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (mouse.active && dist < 200) {
+            const force = mouse.repel ? -0.5 : 0.15;
+            const angle = Math.atan2(dy, dx);
+            this.vx += Math.cos(angle) * force;
+            this.vy += Math.sin(angle) * force;
         }
-        update() {
-            const dx = mouse.x - this.x;
-            const dy = mouse.y - this.y;
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x < 0) this.x = canvas.width;
+        if (this.x > canvas.width) this.x = 0;
+        if (this.y < 0) this.y = canvas.height;
+        if (this.y > canvas.height) this.y = 0;
+    }
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue}, 80%, 70%, 0.8)`;
+        ctx.fill();
+    }
+}
+
+function initParticles() {
+    particles = [];
+    for (let i = 0; i < targetCount; i++) particles.push(new Particle());
+}
+initParticles();
+
+function drawLines() {
+    for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+            const dx = particles[i].x - particles[j].x;
+            const dy = particles[i].y - particles[j].y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (mouse.active && dist < 200) {
-                const force = mouse.repel ? -0.5 : 0.15;
-                const angle = Math.atan2(dy, dx);
-                this.vx += Math.cos(angle) * force;
-                this.vy += Math.sin(angle) * force;
+            if (dist < 80) {
+                ctx.strokeStyle = `rgba(88, 166, 255, ${0.15 * (1 - dist / 80)})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(particles[i].x, particles[i].y);
+                ctx.lineTo(particles[j].x, particles[j].y);
+                ctx.stroke();
             }
-            this.vx *= 0.98;
-            this.vy *= 0.98;
-            this.x += this.vx;
-            this.y += this.vy;
-            if (this.x < 0) this.x = canvas.width;
-            if (this.x > canvas.width) this.x = 0;
-            if (this.y < 0) this.y = canvas.height;
-            if (this.y > canvas.height) this.y = 0;
-        }
-        draw() {
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-            ctx.fillStyle = `hsla(${this.hue}, 80%, 70%, 0.8)`;
-            ctx.fill();
         }
     }
+}
 
-    function initParticles() {
-        particles = [];
-        for (let i = 0; i < targetCount; i++) particles.push(new Particle());
-    }
+function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    while (particles.length < targetCount) particles.push(new Particle());
+    while (particles.length > targetCount) particles.pop();
+    particles.forEach(p => { p.update(); p.draw(); });
+    drawLines();
+    requestAnimationFrame(animate);
+}
+animate();
+
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+    mouse.active = true;
+});
+canvas.addEventListener('mouseleave', () => mouse.active = false);
+canvas.addEventListener('mousedown', () => mouse.repel = true);
+canvas.addEventListener('mouseup', () => mouse.repel = false);
+
+document.getElementById('count-slider').addEventListener('input', e => {
+    targetCount = parseInt(e.target.value);
+    document.getElementById('count-val').textContent = targetCount;
+});
+document.getElementById('reset-btn').addEventListener('click', () => {
     initParticles();
+    addLog('Particles reset.');
+});
 
-    function drawLines() {
-        for (let i = 0; i < particles.length; i++) {
-            for (let j = i + 1; j < particles.length; j++) {
-                const dx = particles[i].x - particles[j].x;
-                const dy = particles[i].y - particles[j].y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 80) {
-                    ctx.strokeStyle = `rgba(88, 166, 255, ${0.15 * (1 - dist / 80)})`;
-                    ctx.lineWidth = 0.5;
-                    ctx.beginPath();
-                    ctx.moveTo(particles[i].x, particles[i].y);
-                    ctx.lineTo(particles[j].x, particles[j].y);
-                    ctx.stroke();
+// --- Conway's Game of Life ---
+const lifeCanvas = document.getElementById('life-canvas');
+const lifeCtx = lifeCanvas.getContext('2d');
+const CELL_SIZE = 10;
+const COLS = 64;
+const ROWS = 40;
+lifeCanvas.width = COLS * CELL_SIZE;
+lifeCanvas.height = ROWS * CELL_SIZE;
+
+let grid = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+let gen = 0;
+let running = false;
+let lifeInterval = null;
+
+function drawLife() {
+    lifeCtx.fillStyle = '#161b22';
+    lifeCtx.fillRect(0, 0, lifeCanvas.width, lifeCanvas.height);
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            if (grid[y][x]) {
+                lifeCtx.fillStyle = '#58a6ff';
+                lifeCtx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE - 1, CELL_SIZE - 1);
+            }
+        }
+    }
+    // grid lines
+    lifeCtx.strokeStyle = '#21262d';
+    lifeCtx.lineWidth = 0.5;
+    for (let x = 0; x <= COLS; x++) {
+        lifeCtx.beginPath();
+        lifeCtx.moveTo(x * CELL_SIZE, 0);
+        lifeCtx.lineTo(x * CELL_SIZE, lifeCanvas.height);
+        lifeCtx.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+        lifeCtx.beginPath();
+        lifeCtx.moveTo(0, y * CELL_SIZE);
+        lifeCtx.lineTo(lifeCanvas.width, y * CELL_SIZE);
+        lifeCtx.stroke();
+    }
+}
+
+function lifeStep() {
+    const next = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            let n = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const ny = (y + dy + ROWS) % ROWS;
+                    const nx = (x + dx + COLS) % COLS;
+                    n += grid[ny][nx];
                 }
             }
-        }
-    }
-
-    function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        while (particles.length < targetCount) particles.push(new Particle());
-        while (particles.length > targetCount) particles.pop();
-        particles.forEach(p => { p.update(); p.draw(); });
-        drawLines();
-        requestAnimationFrame(animate);
-    }
-    animate();
-
-    canvas.addEventListener('mousemove', e => {
-        const rect = canvas.getBoundingClientRect();
-        mouse.x = e.clientX - rect.left;
-        mouse.y = e.clientY - rect.top;
-        mouse.active = true;
-    });
-    canvas.addEventListener('mouseleave', () => mouse.active = false);
-    canvas.addEventListener('mousedown', () => mouse.repel = true);
-    canvas.addEventListener('mouseup', () => mouse.repel = false);
-
-    document.getElementById('count-slider').addEventListener('input', e => {
-        targetCount = parseInt(e.target.value);
-        document.getElementById('count-val').textContent = targetCount;
-    });
-    document.getElementById('reset-btn').addEventListener('click', () => {
-        initParticles();
-        addLog('Particles reset.');
-    });
-
-    // --- Sandbox Log / REPL ---
-    const log = document.getElementById('sandbox-log');
-    const input = document.getElementById('sandbox-input');
-    function addLog(msg, cls='') {
-        const div = document.createElement('div');
-        div.className = 'log-entry ' + cls;
-        div.textContent = msg;
-        log.appendChild(div);
-        log.scrollTop = log.scrollHeight;
-    }
-    input.addEventListener('keydown', async e => {
-        if (e.key !== 'Enter') return;
-        const cmd = input.value.trim();
-        if (!cmd) return;
-        addLog('> ' + cmd, 'user-cmd');
-        input.value = '';
-        const lower = cmd.toLowerCase();
-        if (lower === 'help') {
-            addLog('Commands: help, echo [text], date, random, uptime, particles [n], clear');
-        } else if (lower.startsWith('echo ')) {
-            addLog(cmd.slice(5));
-        } else if (lower === 'date') {
-            addLog(new Date().toLocaleString());
-        } else if (lower === 'random') {
-            addLog(Math.random().toFixed(6));
-        } else if (lower === 'uptime') {
-            try {
-                const r = await fetch('/api/uptime');
-                const d = await r.json();
-                addLog('Uptime: ' + d.elapsed);
-            } catch { addLog('Could not fetch uptime.'); }
-        } else if (lower.startsWith('particles ')) {
-            const n = parseInt(lower.split(' ')[1]);
-            if (n >= 50 && n <= 500) {
-                targetCount = n;
-                document.getElementById('count-slider').value = n;
-                document.getElementById('count-val').textContent = n;
-                addLog('Particles set to ' + n);
+            if (grid[y][x]) {
+                next[y][x] = (n === 2 || n === 3) ? 1 : 0;
             } else {
-                addLog('Particle count must be 50-500.');
+                next[y][x] = (n === 3) ? 1 : 0;
             }
-        } else if (lower === 'clear') {
-            while (log.firstChild) log.removeChild(log.firstChild);
-        } else {
-            addLog('Unknown command. Type "help" for commands.');
         }
-    });
-    </script>
-</body>
-</html>
+    }
+    grid = next;
+    gen++;
+    document.getElementById('life-gen').textContent = 'Gen: ' + gen;
+    drawLife();
+}
+
+function lifeRun() {
+    const speed = parseInt(document.getElementById('life-speed').value);
+    lifeInterval = setInterval(lifeStep, 1000 / speed);
+    running = true;
+    document.getElementById('life-run').disabled = true;
+    document.getElementById('life-stop').disabled = false;
+    addLog('Game of Life running (' + speed + ' fps).');
+}
+
+function lifeStop() {
+    clearInterval(lifeInterval);
+    running = false;
+    document.getElementById('life-run').disabled = false;
+    document.getElementById('life-stop').disabled = true;
+    addLog('Game of Life stopped at gen ' + gen + '.');
+}
+
+function lifeClear() {
+    lifeStop();
+    grid = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+    gen = 0;
+    document.getElementById('life-gen').textContent = 'Gen: 0';
+    drawLife();
+    addLog('Game of Life cleared.');
+}
+
+function lifeRandom() {
+    lifeStop();
+    grid = Array.from({length: ROWS}, () => Array.from({length: COLS}, () => Math.random() < 0.3 ? 1 : 0));
+    gen = 0;
+    document.getElementById('life-gen').textContent = 'Gen: 0';
+    drawLife();
+    addLog('Game of Life randomized (~30% density).');
+}
+
+document.getElementById('life-step').addEventListener('click', () => { lifeStep(); addLog('Game of Life stepped to gen ' + gen + '.'); });
+document.getElementById('life-run').addEventListener('click', lifeRun);
+document.getElementById('life-stop').addEventListener('click', lifeStop);
+document.getElementById('life-clear').addEventListener('click', lifeClear);
+document.getElementById('life-random').addEventListener('click', lifeRandom);
+
+lifeCanvas.addEventListener('click', e => {
+    const rect = lifeCanvas.getBoundingClientRect();
+    const scaleX = lifeCanvas.width / rect.width;
+    const scaleY = lifeCanvas.height / rect.height;
+    const x = Math.floor((e.clientX - rect.left) * scaleX / CELL_SIZE);
+    const y = Math.floor((e.clientY - rect.top) * scaleY / CELL_SIZE);
+    if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
+        grid[y][x] = grid[y][x] ? 0 : 1;
+        drawLife();
+    }
+});
+
+drawLife();
+
+// --- Sandbox Log / REPL ---
+const log = document.getElementById('sandbox-log');
+const input = document.getElementById('sandbox-input');
+function addLog(msg, cls='') {
+    const div = document.createElement('div');
+    div.className = 'log-entry ' + cls;
+    div.textContent = msg;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+}
+input.addEventListener('keydown', async e => {
+    if (e.key !== 'Enter') return;
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    addLog('> ' + cmd, 'user-cmd');
+    input.value = '';
+    const lower = cmd.toLowerCase();
+    if (lower === 'help') {
+        addLog('Commands: help, echo [text], date, random, uptime, particles [n], life [step|run|stop|clear|random], clear');
+    } else if (lower.startsWith('echo ')) {
+        addLog(cmd.slice(5));
+    } else if (lower === 'date') {
+        addLog(new Date().toLocaleString());
+    } else if (lower === 'random') {
+        addLog(Math.random().toFixed(6));
+    } else if (lower === 'uptime') {
+        try {
+            const r = await fetch('/api/uptime');
+            const d = await r.json();
+            addLog('Uptime: ' + d.elapsed);
+        } catch { addLog('Could not fetch uptime.'); }
+    } else if (lower.startsWith('particles ')) {
+        const n = parseInt(lower.split(' ')[1]);
+        if (n >= 50 && n <= 500) {
+            targetCount = n;
+            document.getElementById('count-slider').value = n;
+            document.getElementById('count-val').textContent = n;
+            addLog('Particles set to ' + n);
+        } else {
+            addLog('Particle count must be 50-500.');
+        }
+    } else if (lower.startsWith('life ')) {
+        const sub = lower.split(' ')[1];
+        if (sub === 'step') { lifeStep(); addLog('Life stepped to gen ' + gen + '.'); }
+        else if (sub === 'run') lifeRun();
+        else if (sub === 'stop') lifeStop();
+        else if (sub === 'clear') lifeClear();
+        else if (sub === 'random') lifeRandom();
+        else addLog('Life commands: step, run, stop, clear, random');
+    } else if (lower === 'clear') {
+        while (log.firstChild) log.removeChild(log.firstChild);
+    } else {
+        addLog('Unknown command. Type "help" for commands.');
+    }
+});
+</script>
+{% endblock %}

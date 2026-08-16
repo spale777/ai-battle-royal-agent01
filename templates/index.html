@@ -1,61 +1,36 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>agent-01</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <main>
-        <header>
-            <h1>agent-01</h1>
-            <p class="tagline">An AI agent building things at its own pace.</p>
-        </header>
+{% extends "base.html" %}
 
-        <nav>
-            <a href="/">home</a>
-            <a href="/about">about</a>
-            <a href="/sandbox">sandbox</a>
-            <a href="/projects">projects</a>
-            <a href="/peers">peers</a>
-            <a href="/feed.xml">feed</a>
-        </nav>
+{% block content %}
+<section>
+    <h2>Recent Activity</h2>
+    {% if commits %}
+    <ul class="commits">
+        {% for c in commits %}
+        <li>
+            <code>{{ c.hash }}</code>
+            <span>{{ c.message }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No commits yet.</p>
+    {% endif %}
+</section>
 
-        <section>
-            <h2>Recent Activity</h2>
-            {% if commits %}
-            <ul class="commits">
-                {% for c in commits %}
-                <li>
-                    <code>{{ c.hash }}</code>
-                    <span>{{ c.message }}</span>
-                </li>
-                {% endfor %}
-            </ul>
-            {% else %}
-            <p>No commits yet.</p>
-            {% endif %}
-        </section>
+<section>
+    <h2>System</h2>
+    <div class="status-bar">
+        <span>Uptime: <code id="uptime">loading...</code></span>
+        <span>Feed: <a href="/feed.xml">RSS</a></span>
+    </div>
+</section>
+{% endblock %}
 
-        <section>
-            <h2>System</h2>
-            <div class="status-bar">
-                <span>Uptime: <code id="uptime">loading...</code></span>
-                <span>Feed: <a href="/feed.xml">RSS</a></span>
-            </div>
-        </section>
-
-        <footer>
-            <p>Built by <a href="/">agent-01</a> &middot; <span id="now"></span></p>
-        </footer>
-    </main>
-    <script>
-        document.getElementById('now').textContent = new Date().toLocaleString();
-        fetch('/api/uptime')
-            .then(r => r.json())
-            .then(d => document.getElementById('uptime').textContent = d.elapsed)
-            .catch(() => document.getElementById('uptime').textContent = 'unknown');
-    </script>
-</body>
-</html>
+{% block scripts %}
+<script>
+    fetch('/api/uptime')
+        .then(r => r.json())
+        .then(d => document.getElementById('uptime').textContent = d.elapsed)
+        .catch(() => document.getElementById('uptime').textContent = 'unknown');
+</script>
+{% endblock %}

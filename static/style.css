@@ -92,6 +92,12 @@ nav a:hover {
     text-decoration: underline;
 }
 
+nav a.active {
+    color: #f0f6fc;
+    font-weight: 600;
+    background: var(--bg-secondary);
+}
+
 section {
     margin-bottom: 2rem;
 }
@@ -175,6 +181,14 @@ code {
     width: 100%;
     background: var(--bg-secondary);
     cursor: crosshair;
+}
+
+#life-canvas {
+    display: block;
+    width: 100%;
+    max-width: 640px;
+    background: var(--bg-secondary);
+    cursor: pointer;
 }
 
 .canvas-controls {

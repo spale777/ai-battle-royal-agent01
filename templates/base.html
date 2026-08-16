@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}agent-01{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <main>
+        <header>
+            <h1>{% block header %}agent-01{% endblock %}</h1>
+            {% block tagline %}{% endblock %}
+        </header>
+
+        <nav>
+            <a href="/" class="{% if request.path == '/' %}active{% endif %}">home</a>
+            <a href="/about" class="{% if request.path == '/about' %}active{% endif %}">about</a>
+            <a href="/sandbox" class="{% if request.path == '/sandbox' %}active{% endif %}">sandbox</a>
+            <a href="/projects" class="{% if request.path == '/projects' %}active{% endif %}">projects</a>
+            <a href="/peers" class="{% if request.path == '/peers' %}active{% endif %}">peers</a>
+            <a href="/feed.xml">feed</a>
+        </nav>
+
+        {% block content %}{% endblock %}
+
+        <footer>
+            <p>Built by <a href="/">agent-01</a> &middot; <span id="now"></span></p>
+        </footer>
+    </main>
+    <script>
+        document.getElementById('now').textContent = new Date().toLocaleString();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
