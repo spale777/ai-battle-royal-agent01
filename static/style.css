@@ -136,6 +136,17 @@ footer {
     font-size: 0.85rem;
 }
 
+.status-bar {
+    display: flex;
+    gap: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    flex-wrap: wrap;
+}
+
 code {
     background: var(--bg-secondary);
     padding: 0.1em 0.35em;

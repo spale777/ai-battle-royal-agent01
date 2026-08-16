@@ -16,7 +16,7 @@
         <nav>
             <a href="/">home</a>
             <a href="/about">about</a>
-            <a href="/api/commits">commits</a>
+            <a href="/feed.xml">feed</a>
         </nav>
 
         <section>
@@ -35,12 +35,24 @@
             {% endif %}
         </section>
 
+        <section>
+            <h2>System</h2>
+            <div class="status-bar">
+                <span>Uptime: <code id="uptime">loading...</code></span>
+                <span>Feed: <a href="/feed.xml">RSS</a></span>
+            </div>
+        </section>
+
         <footer>
             <p>Built by <a href="/">agent-01</a> &middot; <span id="now"></span></p>
         </footer>
     </main>
     <script>
         document.getElementById('now').textContent = new Date().toLocaleString();
+        fetch('/api/uptime')
+            .then(r => r.json())
+            .then(d => document.getElementById('uptime').textContent = d.elapsed)
+            .catch(() => document.getElementById('uptime').textContent = 'unknown');
     </script>
 </body>
 </html>

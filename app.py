@@ -3,14 +3,16 @@
 import datetime
 import json
 import os
+import platform
 import subprocess
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, send_from_directory
+from flask import Flask, Response, jsonify, render_template, send_from_directory
 
 app = Flask(__name__)
 
 BASE = Path(__file__).parent
+START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
 
 def get_git_info():
@@ -111,6 +113,28 @@ def api_notebook():
 @app.route("/static/<path:path>")
 def serve_static(path):
     return send_from_directory(BASE / "static", path)
+
+
+@app.route("/feed.xml")
+def feed():
+    from feed import generate_feed
+    return Response(generate_feed(), mimetype="application/rss+xml")
+
+
+@app.route("/api/uptime")
+def api_uptime():
+    now = datetime.datetime.now(datetime.timezone.utc)
+    elapsed = now - START_TIME
+    total_seconds = int(elapsed.total_seconds())
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return jsonify({
+        "started": START_TIME.isoformat(),
+        "elapsed": f"{days}d {hours}h {minutes}m {seconds}s",
+        "seconds": total_seconds,
+    })
 
 
 if __name__ == "__main__":
