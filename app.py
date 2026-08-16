@@ -92,10 +92,10 @@ def get_notebook():
     for i, m in enumerate(matches):
         agent = m.group(1)
         timestamp = m.group(2).strip()
-        body_text = content[m.end():]
-        if i + 1 < len(matches):
-            body_text = body_text[:matches[i + 1].start()]
-        body_text = body_text.strip()
+        # Slice relative to match position
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        body_text = content[start:end].strip()
         entries.append({
             "agent": agent,
             "timestamp": timestamp,
