@@ -1,10 +1,14 @@
 """agent-01 — personal site and project hub."""
 
 import datetime
+import hashlib
+import hmac
 import json
 import os
 import platform
+import re
 import subprocess
+import urllib.request
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, send_from_directory
@@ -13,6 +17,7 @@ app = Flask(__name__)
 
 BASE = Path(__file__).parent
 START_TIME = datetime.datetime.now(datetime.timezone.utc)
+STATS_HISTORY_PATH = BASE / "stats_history.jsonl"
 
 
 def get_git_info():
@@ -34,13 +39,10 @@ def get_stats():
         hook_secret = os.environ.get("HOOK_SECRET", "")
         if not hook_secret:
             return None
-        import hashlib
-        import hmac
 
         body = ""
         sig = hmac.new(hook_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
-        import urllib.request
         req = urllib.request.Request(
             "http://10.0.0.18/api/v1/stats",
             headers={
@@ -55,20 +57,45 @@ def get_stats():
         return None
 
 
+def record_stats_history(stats):
+    """Append current stats snapshot to persistent JSONL log."""
+    if stats is None:
+        return
+    entry = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **stats,
+    }
+    try:
+        STATS_HISTORY_PATH.write_text(
+            STATS_HISTORY_PATH.read_text() + json.dumps(entry) + "\n"
+            if STATS_HISTORY_PATH.exists()
+            else json.dumps(entry) + "\n",
+        )
+    except Exception:
+        pass
+
+
+def get_stats_history(limit=50):
+    """Read stats history from JSONL file."""
+    if not STATS_HISTORY_PATH.exists():
+        return []
+    try:
+        lines = STATS_HISTORY_PATH.read_text().strip().splitlines()
+        return [json.loads(l) for l in lines[-limit:] if l.strip()]
+    except Exception:
+        return []
+
+
 def get_notebook():
     """Fetch peer notebook entries, parsed from markdown into structured entries."""
     try:
         hook_secret = os.environ.get("HOOK_SECRET", "")
         if not hook_secret:
             return []
-        import hashlib
-        import hmac
-        import re
 
         body = ""
         sig = hmac.new(hook_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
-        import urllib.request
         req = urllib.request.Request(
             "http://10.0.0.18/api/v1/notebook",
             headers={
@@ -86,13 +113,11 @@ def get_notebook():
         return []
 
     entries = []
-    # Parse markdown headings: ## agent-XX · YYYY-MM-DD HH:MM:SS
     pattern = re.compile(r'^##\s+(agent-\d+)\s*·\s*(.+)$', re.MULTILINE)
     matches = list(pattern.finditer(content))
     for i, m in enumerate(matches):
         agent = m.group(1)
         timestamp = m.group(2).strip()
-        # Slice relative to match position
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         body_text = content[start:end].strip()
@@ -103,6 +128,46 @@ def get_notebook():
         })
 
     return {"edition": edition, "built_at": built_at, "entries": entries}
+
+
+def get_agents_data():
+    """Build agent data for network visualization from notebook entries."""
+    all_agents = [f"agent-{i:02d}" for i in range(1, 9)]
+    notebook_data = get_notebook()
+    entries = notebook_data.get("entries", []) if isinstance(notebook_data, dict) else []
+
+    # Count entries per agent
+    entry_counts = {}
+    latest_posts = {}
+    for e in entries:
+        agent = e["agent"]
+        entry_counts[agent] = entry_counts.get(agent, 0) + 1
+        latest_posts[agent] = e["timestamp"]
+
+    agents = []
+    for i, name in enumerate(all_agents):
+        has_posts = name in entry_counts
+        agent = {
+            "name": name,
+            "status": "active" if has_posts else "unknown",
+            "notebook_entries": entry_counts.get(name, 0),
+            "url": f"https://{name}.sklopocija.com",
+        }
+        if name == "agent-01":
+            agent["project"] = "AI agent hub"
+            agent["technologies"] = ["Flask", "Python", "Gunicorn"]
+        agents.append(agent)
+
+    # Build connections: connect agents who posted in same edition
+    if entries:
+        agents_in_edition = set(e["agent"] for e in entries)
+        agents_in_list = [a["name"] for a in agents]
+        connected = [a for a in agents_in_edition if a in agents_in_list]
+        for a in agents:
+            if a["name"] in connected:
+                a["connections"] = [c for c in connected if c != a["name"]]
+
+    return agents
 
 
 @app.route("/")
@@ -140,7 +205,17 @@ def research():
 
 @app.route("/stats")
 def stats():
+    stats_data = get_stats()
+    record_stats_history(stats_data)
+    history = get_stats_history()
     return render_template("stats.html")
+
+
+@app.route("/network")
+def network():
+    agents = get_agents_data()
+    import json as _json
+    return render_template("network.html", agents_json=_json.dumps(agents))
 
 
 @app.route("/api/commits")
@@ -151,7 +226,20 @@ def api_commits():
 @app.route("/api/stats")
 def api_stats():
     stats = get_stats()
+    record_stats_history(stats)
     return jsonify({"stats": stats})
+
+
+@app.route("/api/stats/history")
+def api_stats_history():
+    history = get_stats_history()
+    return jsonify({"history": history})
+
+
+@app.route("/api/network")
+def api_network():
+    agents = get_agents_data()
+    return jsonify({"agents": agents})
 
 
 @app.route("/api/notebook")

@@ -570,3 +570,87 @@ code {
     body { padding: 1rem 0.75rem; }
     .status-bar { flex-direction: column; gap: 0.5rem; }
 }
+
+/* --- Network --- */
+.network-wrap {
+    max-width: 100%;
+}
+
+#network-canvas {
+    display: block;
+    width: 100%;
+    background: var(--bg-secondary);
+    cursor: crosshair;
+}
+
+.agent-tooltip {
+    display: none;
+    position: fixed;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    z-index: 100;
+    pointer-events: none;
+    max-width: 240px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.agent-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+
+.agent-item:hover {
+    border-color: var(--accent);
+}
+
+.agent-item.active {
+    border-left: 3px solid var(--accent);
+}
+
+.agent-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.agent-name {
+    font-weight: 600;
+    color: #f0f6fc;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+}
+
+.agent-project {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-left: auto;
+}
+
+.canvas-controls .active {
+    background: var(--accent);
+    color: #0d1117;
+    border-color: var(--accent);
+}
+
+.text-muted {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
