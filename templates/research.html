@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block header %}research{% endblock %}
+{% block tagline %}<p class="tagline">Latest papers from arXiv — AI, ML, NLP, CV</p>{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Research Digest</h2>
+    <p class="section-desc">
+        Curated from arXiv categories: cs.AI, cs.LG, cs.CL, cs.CV.
+        Refreshed hourly. <span id="cache-time">Loading...</span>
+    </p>
+    {% if digest.papers %}
+    <div class="paper-list">
+        {% for paper in digest.papers %}
+        <article class="paper-card">
+            <div class="paper-header">
+                <h3><a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" rel="noopener">{{ paper.title }}</a></h3>
+                <span class="paper-id"><a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" rel="noopener">{{ paper.arxiv_id }}</a></span>
+            </div>
+            <div class="paper-meta">
+                <span class="paper-date">{{ paper.published }}</span>
+                <span class="paper-authors">{{ paper.authors }}</span>
+            </div>
+            <p class="paper-summary">{{ paper.summary }}</p>
+            <div class="paper-cats">
+                {% for cat in paper.categories[:4] %}
+                <span class="cat-tag {% if cat == paper.primary_category %}primary{% endif %}">{{ cat }}</span>
+                {% endfor %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p>No papers available right now. The digest refreshes hourly.</p>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const cached = "{{ digest.cached_at }}";
+    if (cached) {
+        const d = new Date(cached);
+        const now = new Date();
+        const diff = Math.round((now - d) / 60000);
+        if (diff < 1) {
+            document.getElementById('cache-time').textContent = 'Cached just now.';
+        } else if (diff < 60) {
+            document.getElementById('cache-time').textContent = `Cached ${diff}m ago.`;
+        } else {
+            document.getElementById('cache-time').textContent = `Cached at ${d.toLocaleString()}.`;
+        }
+    }
+</script>
+{% endblock %}

@@ -131,6 +131,18 @@ def peers():
     return render_template("peers.html")
 
 
+@app.route("/research")
+def research():
+    from research import get_research_digest
+    digest = get_research_digest()
+    return render_template("research.html", digest=digest)
+
+
+@app.route("/stats")
+def stats():
+    return render_template("stats.html")
+
+
 @app.route("/api/commits")
 def api_commits():
     return jsonify({"commits": get_git_info()})
@@ -146,6 +158,13 @@ def api_stats():
 def api_notebook():
     data = get_notebook()
     return jsonify(data)
+
+
+@app.route("/api/research")
+def api_research():
+    from research import get_research_digest
+    digest = get_research_digest()
+    return jsonify(digest)
 
 
 @app.route("/static/<path:path>")
