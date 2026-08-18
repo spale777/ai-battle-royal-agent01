@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block header %}timeline{% endblock %}
+{% block tagline %}<p class="tagline">Deployment history and commit log</p>{% endblock %}
+
+{% block content %}
+<section>
+    <div class="timeline-stats" id="timeline-stats">
+        <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Commits</div></div>
+        <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Total Added</div></div>
+        <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Total Removed</div></div>
+        <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">First Commit</div></div>
+    </div>
+
+    <div class="sparkline-wrap">
+        <h3>Lines Changed Over Time</h3>
+        <canvas id="timeline-chart" class="sparkline-canvas" style="height: 150px;"></canvas>
+    </div>
+
+    <div id="timeline-feed">
+        <p>Loading...</p>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.timeline-entry {
+    border-left: 2px solid var(--border);
+    padding: 1rem 0 1rem 1.5rem;
+    position: relative;
+    margin-bottom: 0;
+}
+.timeline-entry::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 1.3rem;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #58a6ff;
+    border: 2px solid var(--bg);
+}
+.timeline-meta {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.3rem;
+}
+.timeline-hash {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #bc8cff;
+    background: rgba(188,140,255,0.1);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+}
+.timeline-date {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.timeline-message {
+    color: #f0f6fc;
+    font-size: 0.95rem;
+    font-weight: 500;
+    margin-bottom: 0.3rem;
+}
+.timeline-files {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.timeline-files span.add { color: #3fb950; }
+.timeline-files span.del { color: #f97583; }
+.timeline-files-detail {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    font-family: monospace;
+}
+.timeline-files-detail .file-row {
+    padding: 0.15rem 0;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.timeline-files-detail .file-row:hover {
+    color: var(--text);
+}
+.timeline-files-detail .file-row .add { color: #3fb950; }
+.timeline-files-detail .file-row .del { color: #f97583; }
+.timeline-files-detail .file-row .fname { color: var(--text); margin-left: 0.3rem; }
+</style>
+<script>
+function drawTimelineChart(canvasId, addedData, deletedData) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    const w = rect.width;
+    const h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!addedData || addedData.length < 2) {
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText('Not enough data', w / 2 - 45, h / 2 + 5);
+        return;
+    }
+
+    const maxVal = Math.max(...addedData, ...deletedData, 1);
+    const n = addedData.length;
+    const step = (w - 40) / (n - 1);
+    const padBot = 25;
+    const padTop = 10;
+    const chartH = h - padTop - padBot;
+
+    // Draw filled areas
+    function drawArea(data, color) {
+        ctx.beginPath();
+        ctx.moveTo(20, padTop + chartH);
+        data.forEach((v, i) => {
+            const x = 20 + i * step;
+            const y = padTop + chartH - (v / maxVal) * chartH;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(20 + (n - 1) * step, padTop + chartH);
+        ctx.closePath();
+        ctx.fillStyle = color + '22';
+        ctx.fill();
+    }
+
+    function drawLine(data, color) {
+        ctx.beginPath();
+        data.forEach((v, i) => {
+            const x = 20 + i * step;
+            const y = padTop + chartH - (v / maxVal) * chartH;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    drawArea(deletedData, '#f97583');
+    drawArea(addedData, '#3fb950');
+    drawLine(deletedData, '#f97583');
+    drawLine(addedData, '#3fb950');
+
+    // Legend
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.fillStyle = '#3fb950';
+    ctx.fillText('● Added', 25, h - 5);
+    ctx.fillStyle = '#f97583';
+    ctx.fillText('● Removed', 100, h - 5);
+}
+
+function loadTimeline() {
+    fetch('/api/timeline')
+        .then(r => r.json())
+        .then(resp => {
+            const timeline = resp.timeline || [];
+            if (timeline.length === 0) {
+                document.getElementById('timeline-feed').innerHTML = '<p style="color:#8b949e">No commits found.</p>';
+                return;
+            }
+
+            // Stats
+            const totalAdded = timeline.reduce((s, c) => s + c.added, 0);
+            const totalDeleted = timeline.reduce((s, c) => s + c.deleted, 0);
+            const firstDate = timeline[timeline.length - 1].date.split(' ')[0].replace(/-/g, '.');
+            document.getElementById('timeline-stats').innerHTML = `
+                <div class="stat-card"><div class="stat-value">${timeline.length}</div><div class="stat-label">Commits</div></div>
+                <div class="stat-card"><div class="stat-value">+${totalAdded.toLocaleString()}</div><div class="stat-label">Lines Added</div></div>
+                <div class="stat-card"><div class="stat-value">-${totalDeleted.toLocaleString()}</div><div class="stat-label">Lines Removed</div></div>
+                <div class="stat-card"><div class="stat-value">${firstDate}</div><div class="stat-label">First Commit</div></div>
+            `;
+
+            // Chart data (reversed so oldest first for x-axis)
+            const reversed = [...timeline].reverse();
+            const addedData = reversed.map(c => c.added);
+            const deletedData = reversed.map(c => c.deleted);
+            drawTimelineChart('timeline-chart', addedData, deletedData);
+
+            // Feed
+            let html = '';
+            timeline.forEach(commit => {
+                const filesHtml = (commit.files || []).slice(0, 5).map(f =>
+                    `<div class="file-row" onclick="loadFile('${f.file}')">
+                        <span class="add">+${f.added}</span>
+                        <span class="del">-${f.deleted}</span>
+                        <span class="fname">${f.file}</span>
+                    </div>`
+                ).join('');
+                const more = commit.files_changed > 5 ? `<div class="file-row"><span class="fname">…and ${commit.files_changed - 5} more</span></div>` : '';
+
+                html += `
+                <div class="timeline-entry">
+                    <div class="timeline-meta">
+                        <span class="timeline-hash">${commit.hash}</span>
+                        <span class="timeline-date">${commit.date.replace('T', ' ').split('.')[0]}</span>
+                    </div>
+                    <div class="timeline-message">${commit.message}</div>
+                    <div class="timeline-files">
+                        ${commit.files_changed} file${commit.files_changed !== 1 ? 's' : ''} changed
+                        <span class="add">+${commit.added}</span>
+                        <span class="del">-${commit.deleted}</span>
+                    </div>
+                    <div class="timeline-files-detail">${filesHtml}${more}</div>
+                </div>`;
+            });
+            document.getElementById('timeline-feed').innerHTML = html;
+        })
+        .catch(() => {
+            document.getElementById('timeline-feed').innerHTML = '<p style="color:#f97583">Failed to load timeline.</p>';
+        });
+}
+
+function loadFile(filepath) {
+    fetch('/api/file/' + encodeURIComponent(filepath))
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) return;
+            const lines = d.content.split('\n').map((l, i) =>
+                `<div style="padding:1px 8px;border-left:1px solid var(--border);display:flex"><span style="color:var(--text-muted);min-width:2.5rem;text-align:right;margin-right:0.75rem;font-size:0.8rem;flex-shrink:0">${i + 1}</span><span style="flex:1;overflow-x:auto">${escapeHtml(l)}</span></div>`
+            ).join('');
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:999;display:flex;align-items:center;justify-content:center;padding:2rem;';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;max-width:900px;max-height:80vh;width:100%;display:flex;flex-direction:column;">
+                    <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                        <code style="color:#f0f6fc;font-size:0.9rem">${d.path}</code>
+                        <span style="color:var(--text-muted);font-size:0.8rem">${d.lines} lines</span>
+                    </div>
+                    <div style="overflow:auto;flex:1;padding:0.5rem;font-family:monospace;font-size:0.8rem;color:var(--text);background:var(--bg-secondary);">
+                        ${lines}
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') modal.remove(); });
+        })
+        .catch(() => {});
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadTimeline();
+</script>
+{% endblock %}

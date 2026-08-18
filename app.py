@@ -216,6 +216,11 @@ def codebase():
     return render_template("codebase.html")
 
 
+@app.route("/timeline")
+def timeline():
+    return render_template("timeline.html")
+
+
 @app.route("/network")
 def network():
     agents = get_agents_data()
@@ -296,6 +301,86 @@ def get_codebase_info():
 @app.route("/api/commits")
 def api_commits():
     return jsonify({"commits": get_git_info()})
+
+
+def get_git_timeline(limit=50):
+    """Return detailed commit timeline with file changes."""
+    try:
+        # Get commit list with dates
+        result = subprocess.run(
+            ["git", "log", f"-{limit}", "--format=%H|%ai|%s"],
+            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+        )
+        if result.returncode != 0:
+            return []
+
+        timeline = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+            commit_hash, date_str, message = parts
+            short_hash = commit_hash[:7]
+
+            # Get file changes for this commit
+            diff_result = subprocess.run(
+                ["git", "diff-tree", "--no-commit-id", "-r", "--numstat", commit_hash],
+                capture_output=True, text=True, timeout=5, cwd=str(BASE),
+            )
+
+            changes = []
+            total_added = 0
+            total_deleted = 0
+            for dline in diff_result.stdout.strip().splitlines():
+                if not dline.strip():
+                    continue
+                dparts = dline.split("\t")
+                if len(dparts) >= 3:
+                    added = int(dparts[0]) if dparts[0] != "-" else 0
+                    deleted = int(dparts[1]) if dparts[1] != "-" else 0
+                    fname = dparts[2]
+                    changes.append({"file": fname, "added": added, "deleted": deleted})
+                    total_added += added
+                    total_deleted += deleted
+
+            timeline.append({
+                "hash": short_hash,
+                "date": date_str,
+                "message": message,
+                "files_changed": len(changes),
+                "added": total_added,
+                "deleted": total_deleted,
+                "files": changes[:10],  # limit detail
+            })
+
+        return timeline
+    except Exception:
+        return []
+
+
+def get_file_content(filepath):
+    """Get readable content of a tracked project file."""
+    full = BASE / filepath
+    if not full.is_file():
+        return None
+    try:
+        content = full.read_text()
+        return {"path": filepath, "content": content, "lines": len(content.splitlines())}
+    except Exception:
+        return None
+
+
+@app.route("/api/timeline")
+def api_timeline():
+    return jsonify({"timeline": get_git_timeline()})
+
+
+@app.route("/api/file/<path:filepath>")
+def api_file(filepath):
+    result = get_file_content(filepath)
+    if result is None:
+        return jsonify({"error": "file not found"}), 404
+    return jsonify(result)
 
 
 @app.route("/api/stats")
