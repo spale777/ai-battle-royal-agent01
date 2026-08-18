@@ -14,6 +14,19 @@
 </section>
 
 <section>
+    <h2>API Self-Check</h2>
+    <p class="section-desc">
+        <code>/api/health</code> pings every API endpoint and asserts valid JSON, the
+        expected key, and a non-empty payload. A broken endpoint shows here instead of
+        being silently assumed healthy.
+    </p>
+    <div class="status-bar" id="api-health-bar">
+        <span>Endpoints: <strong id="api-health-summary">checking...</strong></span>
+    </div>
+    <ul class="health-list" id="api-health-list"><li>Loading...</li></ul>
+</section>
+
+<section>
     <h2>Traffic Overview</h2>
     <p class="section-desc">Last 24h window</p>
     <div class="stats-grid">
@@ -165,6 +178,29 @@ function escapeHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function renderApiHealth(h) {
+    const summary = document.getElementById('api-health-summary');
+    const list = document.getElementById('api-health-list');
+    if (!summary || !list) return;
+    summary.textContent = h.passed + ' / ' + h.checked + ' passing';
+    summary.style.color = h.ok ? 'var(--green)' : 'var(--yellow)';
+    if (h.endpoints && h.endpoints.length) {
+        list.innerHTML = h.endpoints.map(ep => {
+            const status = ep.ok
+                ? '<span class="ok-dot">●</span> ' + ep.route + ' <span class="muted">(' + (ep.ms || 0) + 'ms)</span>'
+                : '<span class="err-dot">●</span> ' + ep.route + ' <span class="muted">— ' + escapeHtml(ep.error || 'unknown error') + '</span>';
+            return '<li>' + status + '</li>';
+        }).join('');
+    } else {
+        list.innerHTML = '<li>No endpoints reported.</li>';
+    }
+}
+
+fetch('/api/health').then(r => r.json()).then(renderApiHealth).catch(() => {
+    const s = document.getElementById('api-health-summary');
+    if (s) { s.textContent = 'unavailable'; s.style.color = 'var(--red)'; }
+});
+
 Promise.all([
     fetch('/api/uptime').then(r => r.json()),
     fetch('/api/stats').then(r => r.json()),
@@ -255,13 +291,15 @@ setInterval(() => {
     Promise.all([
         fetch('/api/uptime').then(r => r.json()),
         fetch('/api/stats').then(r => r.json()),
-    ]).then(([uptime, stats]) => {
+        fetch('/api/health').then(r => r.json()).catch(() => null),
+    ]).then(([uptime, stats, health]) => {
         const s = stats.stats || {};
         document.getElementById('health-uptime').textContent = uptime.elapsed || '—';
         document.getElementById('dp-pageviews').textContent = s.pageviews || '—';
         document.getElementById('dp-visitors').textContent = s.visitors || '—';
         document.getElementById('dp-visits').textContent = s.visits || '—';
         document.getElementById('dp-bounces').textContent = s.bounces || '—';
+        if (health) renderApiHealth(health);
     }).catch(() => {});
 }, 60000);
 </script>

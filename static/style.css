@@ -14,6 +14,7 @@
     --accent: #58a6ff;
     --green: #3fb950;
     --yellow: #d29922;
+    --red: #f85149;
     --border: #30363d;
     --mono: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
 }
@@ -26,6 +27,7 @@
     --accent: #0969da;
     --green: #1a7f37;
     --yellow: #9a6700;
+    --red: #cf222e;
     --border: #d0d7de;
 }
 
@@ -171,6 +173,30 @@ footer {
     font-size: 0.9rem;
     flex-wrap: wrap;
 }
+
+/* --- API self-check (dashboard) --- */
+.health-list {
+    list-style: none;
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    max-height: 16rem;
+    overflow-y: auto;
+}
+.health-list li {
+    padding: 0.2rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+.health-list .ok-dot { color: var(--green); }
+.health-list .err-dot { color: var(--red); }
+.health-list .muted { color: var(--text-muted); }
 
 code {
     background: var(--bg-secondary);

@@ -635,7 +635,7 @@ def api_search():
     """Search across site content: commits, devlog, research, notebook."""
     q = request.args.get("q", "").strip().lower()
     if not q or len(q) < 2:
-        return jsonify({"results": []})
+        return jsonify({"results": [], "query": q})
 
     results = []
 
@@ -772,6 +772,68 @@ def api_uptime():
         "started": START_TIME.isoformat(),
         "elapsed": f"{days}d {hours}h {minutes}m {seconds}s",
         "seconds": total_seconds,
+    })
+
+
+# (route, expected top-level key, expected python type, must-not-be-falsy)
+# Used by /api/health to self-verify the whole API surface. The "non-null"
+# requirement is what catches the "shipped but returns null" failure mode
+# (e.g. the earlier /api/codebase: {"codebase": null} bug).
+_API_CHECKS = [
+    ("/api/uptime", "elapsed", str, True),
+    ("/api/commits", "commits", list, True),
+    ("/api/timeline", "timeline", list, True),
+    ("/api/stats", "stats", dict, True),
+    ("/api/stats/history", "history", list, True),
+    ("/api/codebase", "codebase", dict, True),
+    ("/api/analytics", "total", int, True),
+    ("/api/network", "agents", list, True),
+    ("/api/notebook", "edition", int, True),
+    ("/api/research", "papers", list, True),
+]
+
+
+@app.route("/api/health")
+def api_health():
+    """Self-verify every API endpoint: HTTP 200 + valid JSON + expected key/type,
+    and (where flagged) a non-null payload. Returns per-endpoint status so a
+    broken endpoint is surfaced immediately instead of being assumed healthy."""
+    results = []
+    healthy = True
+    with app.test_client() as client:
+        for route, key, typ, non_null in _API_CHECKS:
+            item = {"route": route, "ok": False, "status": None, "ms": None, "error": None}
+            try:
+                t0 = datetime.datetime.now()
+                resp = client.get(route)
+                item["ms"] = int((datetime.datetime.now() - t0).total_seconds() * 1000)
+                item["status"] = resp.status_code
+                data = resp.get_json(silent=True)
+                if resp.status_code != 200:
+                    item["error"] = f"HTTP {resp.status_code}"
+                elif data is None:
+                    item["error"] = "not valid JSON"
+                elif key not in data:
+                    item["error"] = f"missing key '{key}'"
+                elif typ is not None and not isinstance(data[key], typ):
+                    item["error"] = f"key '{key}' is {type(data[key]).__name__}, expected {typ.__name__}"
+                elif non_null and (data[key] in (None, [], {}, "")):
+                    item["error"] = f"key '{key}' is empty/null (endpoint returned no real data)"
+                else:
+                    item["ok"] = True
+            except Exception as e:  # noqa: BLE001
+                item["error"] = f"{type(e).__name__}: {e}"
+            results.append(item)
+            if not item["ok"]:
+                healthy = False
+
+    return jsonify({
+        "ok": healthy,
+        "checked": len(results),
+        "passed": sum(1 for r in results if r["ok"]),
+        "failed": sum(1 for r in results if not r["ok"]),
+        "endpoints": results,
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
 
 

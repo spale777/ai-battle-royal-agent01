@@ -76,25 +76,41 @@ def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
 
 
 def get_research_digest() -> dict:
-    """Return a research digest, using cache if fresh."""
+    """Return a research digest, using cache if fresh.
+
+    Resilience rules (added after a transient arXiv/proxy failure was cached as an
+    empty result and served as "fresh" for an hour):
+      - A fresh cache with papers is served as-is.
+      - A fresh fetch is only cached if it actually returned papers.
+      - If a fresh fetch fails or comes back empty, we fall back to a stale cache
+        (stale-while-revalidate) rather than poisoning the cache with an empty list.
+      - If there is no usable cache at all, we return the (possibly empty) digest
+        but do NOT write it to cache, so the next call retries the fetch.
+    """
     now = datetime.now(timezone.utc)
 
-    # Try cache first
+    existing_cache = None
+    cache_is_fresh = False
     if CACHE_FILE.exists():
-        cache = json.loads(CACHE_FILE.read_text())
-        cached_at = datetime.fromisoformat(cache["cached_at"])
-        age = (now - cached_at).total_seconds()
-        if age < CACHE_TTL_SECONDS:
-            return cache
+        try:
+            existing_cache = json.loads(CACHE_FILE.read_text())
+            cached_at = datetime.fromisoformat(existing_cache["cached_at"])
+            cache_is_fresh = (now - cached_at).total_seconds() < CACHE_TTL_SECONDS
+        except (ValueError, json.JSONDecodeError, KeyError):
+            existing_cache = None  # corrupt cache — ignore it
 
-    # Fetch fresh
+    # 1) Fresh cache already has data — serve it, no fetch.
+    if existing_cache and cache_is_fresh and existing_cache.get("papers"):
+        return existing_cache
+
+    # 2) Otherwise attempt a fresh fetch.
     all_papers = []
     for cat in CATEGORIES:
         try:
             papers = _fetch_arxiv(cat, max_results=5)
             all_papers.extend(papers)
         except Exception:
-            pass  # skip categories that fail
+            pass  # skip categories that fail (transient proxy blips happen)
 
     # Deduplicate by arxiv_id and sort by date
     seen = set()
@@ -107,13 +123,26 @@ def get_research_digest() -> dict:
     unique.sort(key=lambda x: x["published"], reverse=True)
     top = unique[:20]  # keep top 20 across all categories
 
-    digest = {
-        "cached_at": now.isoformat(),
-        "papers": top,
-        "total": len(top),
-    }
+    # 3) Fresh fetch succeeded with real data — cache and return it.
+    if top:
+        digest = {
+            "cached_at": now.isoformat(),
+            "papers": top,
+            "total": len(top),
+            "stale": False,
+        }
+        try:
+            CACHE_FILE.write_text(json.dumps(digest, indent=2))
+        except OSError:
+            pass
+        return digest
 
-    # Write cache
-    CACHE_FILE.write_text(json.dumps(digest, indent=2))
+    # 4) Fresh fetch was empty. Fall back to a stale cache if it has data.
+    if existing_cache and existing_cache.get("papers"):
+        stale = dict(existing_cache)
+        stale["stale"] = True  # honest signal: this is older than the TTL
+        return stale
 
-    return digest
+    # 5) No usable data anywhere — return empty, but do NOT cache it, so the next
+    #    call retries the fetch instead of pinning the empty state for an hour.
+    return {"cached_at": now.isoformat(), "papers": [], "total": 0, "stale": False}

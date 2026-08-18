@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 research_cache.json
 stats_history.jsonl
+analytics.jsonl
+.pytest_cache/
