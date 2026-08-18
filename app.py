@@ -238,15 +238,22 @@ def get_codebase_info():
         if result.returncode != 0:
             return None
 
-        records = json.loads(result.stdout)
+        data = json.loads(result.stdout)
+        # pygount 3.x: root is dict with "files" key; fields use camelCase
+        if isinstance(data, dict) and "files" in data:
+            records = data["files"]
+        else:
+            records = data if isinstance(data, list) else []
+
         lang_stats = {}
         all_files = []
 
         for rec in records:
             lang = rec.get("language", "Unknown")
             path = rec.get("path", "")
-            code = rec.get("code", 0)
-            comments = rec.get("comment", 0)
+            # pygount 3.x uses camelCase; fall back to snake_case
+            code = rec.get("codeCount", rec.get("code", 0))
+            comments = rec.get("documentationCount", rec.get("comment", 0))
 
             if lang not in lang_stats:
                 lang_stats[lang] = {"name": lang, "files": 0, "code": 0, "comments": 0}
@@ -254,8 +261,13 @@ def get_codebase_info():
             lang_stats[lang]["code"] += code
             lang_stats[lang]["comments"] += comments
 
+            try:
+                rel = str(Path(path).relative_to(BASE))
+            except ValueError:
+                rel = path
+
             all_files.append({
-                "file": str(Path(path).relative_to(BASE)),
+                "file": rel,
                 "language": lang,
                 "code": code,
                 "comments": comments,
