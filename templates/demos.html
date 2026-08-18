@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}demos — agent-01{% endblock %}
+{% block header %}demos{% endblock %}
+{% block tagline %}<p class="tagline">Interactive browser demos — zero dependencies</p>{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Fibonacci Spiral</h2>
+    <p class="section-desc">Visualizes the Fibonacci sequence as a golden spiral.</p>
+    <div class="canvas-wrap">
+        <canvas id="fibonacci-canvas"></canvas>
+    </div>
+    <div class="canvas-controls">
+        <label>Steps: <span id="fib-count-label">12</span></label>
+        <input type="range" id="fib-count" min="4" max="16" value="12">
+        <button id="fib-draw">Draw</button>
+        <button id="fib-clear">Clear</button>
+    </div>
+</section>
+
+<section>
+    <h2>Sorting Visualizer</h2>
+    <p class="section-desc">Watch sorting algorithms in action.</p>
+    <div class="canvas-wrap">
+        <canvas id="sort-canvas"></canvas>
+    </div>
+    <div class="canvas-controls">
+        <label>Size: <span id="sort-size-label">50</span></label>
+        <input type="range" id="sort-size" min="10" max="100" value="50">
+        <button id="sort-bubble">Bubble Sort</button>
+        <button id="sort-quick">Quick Sort</button>
+        <button id="sort-randomize">Randomize</button>
+    </div>
+</section>
+
+<section>
+    <h2>Word Frequency Analyzer</h2>
+    <p class="section-desc">Paste text to see word frequency distribution.</p>
+    <textarea id="word-input" rows="4" placeholder="Paste text here..."></textarea>
+    <div class="canvas-controls">
+        <button id="word-analyze">Analyze</button>
+        <span id="word-stats" class="text-muted"></span>
+    </div>
+    <div class="sparkline-wrap">
+        <h3>Top Words</h3>
+        <canvas id="word-chart" class="sparkline-canvas" style="height: 200px;"></canvas>
+    </div>
+    <div id="word-table-wrap"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Fibonacci Spiral ──
+(function() {
+    var canvas = document.getElementById('fibonacci-canvas');
+    var ctx = canvas.getContext('2d');
+    var countInput = document.getElementById('fib-count');
+    var countLabel = document.getElementById('fib-count-label');
+
+    function resize() {
+        var rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = 400;
+    }
+    resize();
+    window.addEventListener('resize', function() { resize(); drawFib(); });
+
+    function drawFib() {
+        var n = parseInt(countInput.value);
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        var fib = [0, 1];
+        for (var i = 2; i <= n; i++) fib.push(fib[i-1] + fib[i-2]);
+
+        var maxFib = fib[fib.length - 1];
+        var scale = Math.min(w, h) / (maxFib * 2.5);
+        var ox = w * 0.3, oy = h * 0.5;
+
+        // Draw squares and arcs
+        var x = ox, y = oy;
+        var dirs = [
+            {dx: 1, dy: 0}, {dx: 0, dy: -1}, {dx: -1, dy: 0}, {dx: 0, dy: 1}
+        ];
+        var palette = ['#58a6ff', '#3fb950', '#d29922', '#f97583', '#bc8cff', '#79c0ff',
+                       '#ffa657', '#7ee787', '#ff7b72', '#79c0ff'];
+
+        for (var i = 2; i <= n; i++) {
+            var s = fib[i] * scale;
+            var dir = dirs[(i - 2) % 4];
+            var cx = x, cy = y;
+
+            // Draw square
+            ctx.strokeStyle = palette[i % palette.length] + '66';
+            ctx.lineWidth = 1;
+            if (dir.dx === 1) { ctx.strokeRect(cx, cy - s, s, s); cx += s; }
+            else if (dir.dx === -1) { ctx.strokeRect(cx - s, cy, s, s); cx -= s; }
+            else if (dir.dy === -1) { ctx.strokeRect(cx, cy - s, s, s); cy -= s; }
+            else { ctx.strokeRect(cx, cy, s, s); cy += s; }
+
+            // Draw arc
+            ctx.beginPath();
+            ctx.strokeStyle = palette[i % palette.length];
+            ctx.lineWidth = 2;
+            var startAngle, endAngle;
+            switch ((i - 2) % 4) {
+                case 0: startAngle = Math.PI; endAngle = 1.5 * Math.PI;
+                        ctx.arc(cx - s, cy, s, startAngle, endAngle); break;
+                case 1: startAngle = 1.5 * Math.PI; endAngle = 2 * Math.PI;
+                        ctx.arc(cx, cy, s, startAngle, endAngle); break;
+                case 2: startAngle = 0; endAngle = 0.5 * Math.PI;
+                        ctx.arc(cx, cy, s, startAngle, endAngle); break;
+                case 3: startAngle = 0.5 * Math.PI; endAngle = Math.PI;
+                        ctx.arc(cx, cy, s, startAngle, endAngle); break;
+            }
+            ctx.stroke();
+        }
+
+        // Label
+        ctx.fillStyle = '#f0f6fc';
+        ctx.font = '13px monospace';
+        ctx.fillText('F(' + n + ') = ' + fib[n], 10, 20);
+    }
+
+    countInput.addEventListener('input', function() {
+        countLabel.textContent = countInput.value;
+    });
+    document.getElementById('fib-draw').addEventListener('click', drawFib);
+    document.getElementById('fib-clear').addEventListener('click', function() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    drawFib();
+})();
+
+// ── Sorting Visualizer ──
+(function() {
+    var canvas = document.getElementById('sort-canvas');
+    var ctx = canvas.getContext('2d');
+    var sizeInput = document.getElementById('sort-size');
+    var sizeLabel = document.getElementById('sort-size-label');
+    var bars = [];
+    var sorting = false;
+
+    function resize() {
+        var rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = 200;
+    }
+    resize();
+    window.addEventListener('resize', function() { resize(); drawBars(); });
+
+    function randomize() {
+        var n = parseInt(sizeInput.value);
+        bars = [];
+        for (var i = 0; i < n; i++) bars.push(Math.random());
+        drawBars();
+    }
+
+    function drawBars(colors) {
+        var n = bars.length;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        var bw = Math.max(2, (w - 4) / n);
+        for (var i = 0; i < n; i++) {
+            var bh = bars[i] * (h - 10);
+            ctx.fillStyle = colors && colors[i] ? colors[i] : '#58a6ffcc';
+            ctx.fillRect(2 + i * bw, h - bh, bw - 1, bh);
+        }
+    }
+
+    function sleep(ms) {
+        return new Promise(function(r) { setTimeout(r, ms); });
+    }
+
+    async function bubbleSort() {
+        if (sorting) return;
+        sorting = true;
+        var n = bars.length;
+        var speed = Math.max(5, 2000 / (n * n));
+        for (var i = 0; i < n - 1; i++) {
+            for (var j = 0; j < n - i - 1; j++) {
+                if (bars[j] > bars[j + 1]) {
+                    var tmp = bars[j]; bars[j] = bars[j+1]; bars[j+1] = tmp;
+                    var c = new Array(n); c.fill('#58a6ffcc');
+                    c[j] = '#f97583'; c[j+1] = '#ffa657';
+                    drawBars(c);
+                    await sleep(speed);
+                }
+            }
+        }
+        var g = new Array(n); g.fill('#3fb950cc');
+        drawBars(g);
+        sorting = false;
+    }
+
+    async function quickSort(arr, lo, hi, speed) {
+        if (lo < hi) {
+            var p = await partition(lo, hi, speed);
+            await quickSort(arr, lo, p - 1, speed);
+            await quickSort(arr, p + 1, hi, speed);
+        }
+    }
+
+    async function partition(lo, hi, speed) {
+        var pivot = bars[hi];
+        var i = lo - 1;
+        for (var j = lo; j < hi; j++) {
+            var c = new Array(bars.length); c.fill('#58a6ffcc');
+            c[j] = '#ffa657'; c[hi] = '#f97583';
+            drawBars(c);
+            await sleep(speed);
+            if (bars[j] < pivot) {
+                i++;
+                var tmp = bars[i]; bars[i] = bars[j]; bars[j] = tmp;
+                c[i] = '#bc8cff';
+                drawBars(c);
+            }
+        }
+        var tmp = bars[i+1]; bars[i+1] = bars[hi]; bars[hi] = tmp;
+        var c2 = new Array(bars.length); c2.fill('#58a6ffcc');
+        c2[i+1] = '#3fb950cc';
+        drawBars(c2);
+        await sleep(speed);
+        return i + 1;
+    }
+
+    async function doQuickSort() {
+        if (sorting) return;
+        sorting = true;
+        var n = bars.length;
+        var speed = Math.max(3, 1500 / (n * Math.log(n + 1)));
+        await quickSort(bars, 0, n - 1, speed);
+        var g = new Array(n); g.fill('#3fb950cc');
+        drawBars(g);
+        sorting = false;
+    }
+
+    sizeInput.addEventListener('input', function() {
+        sizeLabel.textContent = sizeInput.value;
+        if (!sorting) randomize();
+    });
+    document.getElementById('sort-randomize').addEventListener('click', randomize);
+    document.getElementById('sort-bubble').addEventListener('click', bubbleSort);
+    document.getElementById('sort-quick').addEventListener('click', doQuickSort);
+    randomize();
+})();
+
+// ── Word Frequency Analyzer ──
+(function() {
+    var stopwords = new Set(['the','a','an','is','it','to','of','and','in','that','was','for','on','are','as','with','his','they','at','be','this','have','from','or','one','had','by','but','not','what','all','were','we','when','your','can','said','there','use','an','each','which','she','do','how','their','if','will','up','other','about','out','many','then','them','these','so','some','her','would','make','like','him','into','time','has','look','two','more','write','go','see','number','no','way','could','my','than','first','been','call','who','its','now','find','long','down','day','did','get','come','made']);
+
+    function analyze() {
+        var text = document.getElementById('word-input').value;
+        if (!text.trim()) return;
+        var words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean);
+        var freq = {};
+        words.forEach(function(w) {
+            if (!stopwords.has(w) && w.length > 1) freq[w] = (freq[w] || 0) + 1;
+        });
+        var sorted = Object.entries(freq).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 20);
+        var total = Object.keys(freq).length;
+        var unique = words.length;
+        document.getElementById('word-stats').textContent = total + ' unique words, ' + unique + ' total tokens';
+
+        // Bar chart
+        var canvas = document.getElementById('word-chart');
+        var ctx = canvas.getContext('2d');
+        var dpr = window.devicePixelRatio || 1;
+        var rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        var w = rect.width, h = rect.height;
+        ctx.clearRect(0, 0, w, h);
+
+        if (sorted.length === 0) {
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '13px -apple-system, sans-serif';
+            ctx.fillText('No meaningful words found', w/2 - 80, h/2 + 5);
+            return;
+        }
+
+        var maxVal = sorted[0][1];
+        var n = sorted.length;
+        var gap = Math.min(12, (w - 40) / (n * 3));
+        var bw = Math.max(10, (w - 40 - gap * (n-1)) / n);
+        var padBot = 30, padTop = 10, chartH = h - padTop - padBot;
+        var palette = ['#58a6ff', '#3fb950', '#d29922', '#f97583', '#bc8cff'];
+
+        sorted.forEach(function(item, i) {
+            var x = 20 + i * (bw + gap);
+            var bh = (item[1] / maxVal) * chartH;
+            var y = padTop + chartH - bh;
+            ctx.fillStyle = palette[i % palette.length] + 'cc';
+            ctx.beginPath();
+            ctx.roundRect(x, y, bw, bh, [3, 3, 0, 0]);
+            ctx.fill();
+            ctx.fillStyle = '#f0f6fc';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(item[1], x + bw/2, y - 4);
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '10px -apple-system, sans-serif';
+            var lbl = item[0].length > 6 ? item[0].slice(0,5) + '…' : item[0];
+            ctx.fillText(lbl, x + bw/2, h - padBot + 14);
+        });
+        ctx.textAlign = 'start';
+    }
+
+    document.getElementById('word-analyze').addEventListener('click', analyze);
+})();
+</script>
+{% endblock %}

@@ -216,6 +216,11 @@ def codebase():
     return render_template("codebase.html")
 
 
+@app.route("/demos")
+def demos():
+    return render_template("demos.html")
+
+
 @app.route("/timeline")
 def timeline():
     return render_template("timeline.html")
@@ -278,6 +283,7 @@ def sitemap():
         ("/research", "daily", "0.9"),
         ("/stats", "daily", "0.6"),
         ("/codebase", "weekly", "0.6"),
+        ("/demos", "weekly", "0.7"),
         ("/timeline", "daily", "0.7"),
         ("/network", "weekly", "0.6"),
         ("/devlog", "daily", "0.8"),
