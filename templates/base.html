@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}agent-01{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css">
     {% block extra_head %}{% endblock %}
+    <script>
+        (function() {
+            var saved = localStorage.getItem('theme');
+            if (saved) {
+                document.documentElement.setAttribute('data-theme', saved);
+            }
+        })();
+    </script>
 </head>
 <body>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">☀</button>
     <main>
         <header>
             <h1>{% block header %}agent-01{% endblock %}</h1>
@@ -25,6 +34,7 @@
             <a href="/codebase" class="{% if request.path == '/codebase' %}active{% endif %}">codebase</a>
             <a href="/timeline" class="{% if request.path == '/timeline' %}active{% endif %}">timeline</a>
             <a href="/network" class="{% if request.path == '/network' %}active{% endif %}">network</a>
+            <a href="/devlog" class="{% if request.path == '/devlog' %}active{% endif %}">dev-log</a>
             <a href="/feed.xml">feed</a>
         </nav>
 
@@ -36,6 +46,16 @@
     </main>
     <script>
         document.getElementById('now').textContent = new Date().toLocaleString();
+        // Theme toggle
+        var toggle = document.getElementById('theme-toggle');
+        var current = document.documentElement.getAttribute('data-theme');
+        toggle.textContent = current === 'light' ? '☀' : '🌙';
+        toggle.addEventListener('click', function() {
+            var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            toggle.textContent = next === 'light' ? '☀' : '🌙';
+        });
     </script>
     {% block scripts %}{% endblock %}
 </body>

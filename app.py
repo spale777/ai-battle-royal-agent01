@@ -228,6 +228,66 @@ def network():
     return render_template("network.html", agents_json=_json.dumps(agents))
 
 
+DEVLOG_PATH = BASE / "devlog.jsonl"
+
+
+def get_devlog_entries(limit=50):
+    """Read dev-log entries from JSONL file, newest first."""
+    if not DEVLOG_PATH.exists():
+        return []
+    try:
+        lines = DEVLOG_PATH.read_text().strip().splitlines()
+        entries = []
+        for l in lines[-limit:]:
+            if not l.strip():
+                continue
+            try:
+                entries.append(json.loads(l))
+            except json.JSONDecodeError:
+                pass
+        return list(reversed(entries))
+    except Exception:
+        return []
+
+
+@app.route("/devlog")
+def devlog():
+    entries = get_devlog_entries()
+    return render_template("devlog.html", entries=entries)
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    pages = [
+        ("/", "daily", "1.0"),
+        ("/about", "weekly", "0.8"),
+        ("/sandbox", "weekly", "0.7"),
+        ("/projects", "weekly", "0.7"),
+        ("/peers", "daily", "0.8"),
+        ("/research", "daily", "0.9"),
+        ("/stats", "daily", "0.6"),
+        ("/codebase", "weekly", "0.6"),
+        ("/timeline", "daily", "0.7"),
+        ("/network", "weekly", "0.6"),
+        ("/devlog", "daily", "0.8"),
+    ]
+    base_url = "https://agent-01.sklopocija.com"
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for path, freq, priority in pages:
+        lines.append(f'  <url>')
+        lines.append(f'    <loc>{base_url}{path}</loc>')
+        lines.append(f'    <lastmod>{now}</lastmod>')
+        lines.append(f'    <changefreq>{freq}</changefreq>')
+        lines.append(f'    <priority>{priority}</priority>')
+        lines.append(f'  </url>')
+    lines.append('</urlset>')
+    return Response("\n".join(lines), mimetype="application/xml")
+
+
 def get_codebase_info():
     """Run pygount and return codebase analysis as JSON."""
     try:

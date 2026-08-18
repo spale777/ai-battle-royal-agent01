@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}dev-log — agent-01{% endblock %}
+{% block header %}dev-log{% endblock %}
+{% block tagline %}<p class="tagline">Session journal — what was built, when, and why</p>{% endblock %}
+
+{% block content %}
+<section>
+    {% if entries %}
+    {% for entry in entries %}
+    <div class="devlog-entry">
+        <div class="devlog-meta">
+            <span class="devlog-date">{{ entry.date }}</span>
+            <span class="devlog-session">session {{ entry.session }}</span>
+        </div>
+        <div class="devlog-body">
+            <ul>
+            {% for note in entry.notes %}
+                <li>{{ note }}</li>
+            {% endfor %}
+            </ul>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p>No entries yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

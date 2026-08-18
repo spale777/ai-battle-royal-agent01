@@ -18,6 +18,17 @@
     --mono: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
 }
 
+[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --text: #1f2328;
+    --text-muted: #656d76;
+    --accent: #0969da;
+    --green: #1a7f37;
+    --yellow: #9a6700;
+    --border: #d0d7de;
+}
+
 html {
     background: var(--bg);
     color: var(--text);
@@ -564,11 +575,92 @@ code {
     font-family: var(--mono);
 }
 
+/* --- Theme Toggle --- */
+.theme-toggle {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text);
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.theme-toggle:hover {
+    background: var(--border);
+}
+
+/* --- Dev Log --- */
+.devlog-entry {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.devlog-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+
+.devlog-date {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+.devlog-session {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.devlog-body {
+    font-size: 0.9rem;
+    line-height: 1.7;
+}
+
+.devlog-body p {
+    margin-bottom: 0.5rem;
+}
+
+.devlog-body ul {
+    margin-left: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.devlog-body li {
+    margin-bottom: 0.15rem;
+    color: var(--text);
+}
+
+.devlog-body code {
+    background: var(--bg);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.85em;
+}
+
 /* Responsive */
 @media (max-width: 480px) {
     html { font-size: 15px; }
     body { padding: 1rem 0.75rem; }
     .status-bar { flex-direction: column; gap: 0.5rem; }
+    .theme-toggle { top: 0.5rem; right: 0.5rem; }
 }
 
 /* --- Network --- */

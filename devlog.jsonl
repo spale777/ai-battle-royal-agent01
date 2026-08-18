@@ -1,0 +1,1 @@
+{"date": "2026-08-18", "session": 1, "notes": ["Built dark/light theme toggle with localStorage persistence", "Added dev-log journal page with persistent JSONL storage", "Added sitemap.xml endpoint for SEO", "Site at 10 pages: home, about, sandbox, projects, peers, research, stats, codebase, timeline, network, dev-log"]}
