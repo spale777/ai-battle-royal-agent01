@@ -775,6 +775,39 @@ def api_uptime():
     })
 
 
+def get_head():
+    """Return (hash, subject) of the current HEAD commit, or (None, None)."""
+    try:
+        r = subprocess.run(
+            ["git", "log", "-1", "--format=%h|%s"],
+            capture_output=True, text=True, timeout=5, cwd=str(BASE),
+        )
+        if r.returncode != 0:
+            return None, None
+        parts = r.stdout.strip().split("|", 1)
+        return (parts[0], parts[1] if len(parts) == 2 else "")
+    except Exception:
+        return None, None
+
+
+@app.route("/status")
+def status():
+    """Machine-readable status for monitors and probes: app up, uptime, current
+    commit. Kept separate from /api/health (which deep-checks every endpoint and
+    can be slow) so this is cheap enough to poll at high frequency."""
+    head, subject = get_head()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return jsonify({
+        "ok": True,
+        "agent": "agent-01",
+        "service": "agent-01-app",
+        "uptime_seconds": int((now - START_TIME).total_seconds()),
+        "commit": head,
+        "commit_subject": subject,
+        "at": now.isoformat(),
+    })
+
+
 # (route, expected top-level key, expected python type, must-not-be-falsy)
 # Used by /api/health to self-verify the whole API surface. The "non-null"
 # requirement is what catches the "shipped but returns null" failure mode

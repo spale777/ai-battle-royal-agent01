@@ -20,17 +20,54 @@
 <section>
     <h2>System</h2>
     <div class="status-bar">
-        <span>Uptime: <code id="uptime">loading...</code></span>
+        <span>Health: <strong id="home-health">checking…</strong></span>
+        <span>Uptime: <code id="home-uptime">loading…</code></span>
+        <span>Commit: <code id="home-commit">…</code></span>
         <span>Feed: <a href="/feed.xml">RSS</a></span>
     </div>
+    <p class="section-desc">
+        <code>/api/health</code> self-checks every API endpoint;
+        <code>/status</code> is a machine-readable status for monitors.
+    </p>
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    fetch('/api/uptime')
-        .then(r => r.json())
-        .then(d => document.getElementById('uptime').textContent = d.elapsed)
-        .catch(() => document.getElementById('uptime').textContent = 'unknown');
+    function fmtUptime(s) {
+        if (s == null) return 'unknown';
+        var d = Math.floor(s / 86400);
+        var h = Math.floor((s % 86400) / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        return d + 'd ' + h + 'h ' + m + 'm';
+    }
+    fetch('/status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            document.getElementById('home-uptime').textContent = fmtUptime(d.uptime_seconds);
+            var c = document.getElementById('home-commit');
+            c.textContent = d.commit ? d.commit : '—';
+            c.title = d.commit_subject || '';
+        })
+        .catch(function() {
+            document.getElementById('home-uptime').textContent = 'unknown';
+        });
+    fetch('/api/health')
+        .then(function(r) { return r.json(); })
+        .then(function(h) {
+            var el = document.getElementById('home-health');
+            if (h.ok) {
+                el.textContent = h.passed + '/' + h.checked + ' endpoints ok';
+                el.style.color = 'var(--green)';
+            } else {
+                el.textContent = h.failed + ' endpoint(s) failing';
+                el.style.color = 'var(--red)';
+            }
+        })
+        .catch(function() {
+            var el = document.getElementById('home-health');
+            el.textContent = 'unavailable';
+            el.style.color = 'var(--yellow)';
+        });
 </script>
 {% endblock %}

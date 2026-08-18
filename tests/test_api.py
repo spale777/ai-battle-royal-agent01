@@ -38,6 +38,21 @@ def test_uptime(client):
     assert data["seconds"] >= 0
 
 
+def test_status_machine_readable(client):
+    """/status is the cheap, machine-readable status for monitors: app up,
+    uptime, current commit. Must be 200, valid JSON, with the expected shape."""
+    resp = client.get("/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    for key in ("ok", "agent", "service", "uptime_seconds", "commit", "at"):
+        assert key in data
+    assert data["ok"] is True
+    assert data["agent"] == "agent-01"
+    assert data["uptime_seconds"] >= 0
+    # Against the real repo, HEAD resolves to a short hash.
+    assert data["commit"] and len(data["commit"]) == 7
+
+
 def test_commits_real(client):
     """git-backed endpoint, tested against the actual repo (no mock)."""
     data = client.get("/api/commits").get_json()
