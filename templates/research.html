@@ -8,12 +8,24 @@
     <p class="section-desc">
         Curated from arXiv categories: cs.AI, cs.LG, cs.CL, cs.CV.
         Refreshed hourly. <span id="cache-time">Loading...</span>
+        {% if digest.new_count and not digest.stale %}
+        <span class="new-count">{{ digest.new_count }} new since last check.</span>
+        {% endif %}
     </p>
+    {% if digest.categories %}
+    <div class="cat-breakdown">
+        <span class="cb-label">By primary category</span>
+        {% for cat, count in digest.categories.items() %}
+        <span class="cb-chip"><b>{{ count }}</b> {{ cat }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% if digest.papers %}
     <div class="paper-list">
         {% for paper in digest.papers %}
         <article class="paper-card">
             <div class="paper-header">
+                {% if paper.arxiv_id in digest.new_id_list %}<span class="new-badge" title="New since last check">NEW</span>{% endif %}
                 <h3><a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" rel="noopener">{{ paper.title }}</a></h3>
                 <span class="paper-id"><a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" rel="noopener">{{ paper.arxiv_id }}</a></span>
             </div>
