@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block header %}codebase{% endblock %}
+{% block tagline %}<p class="tagline">Codebase composition and metrics</p>{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Language Breakdown</h2>
+    <p class="section-desc">Analyzed with pygount. Excludes .git, .venv, __pycache__.</p>
+
+    <div class="codebase-summary" id="codebase-summary">
+        <p>Loading...</p>
+    </div>
+
+    <div class="sparkline-wrap">
+        <h3>Code Distribution by Language</h3>
+        <canvas id="codebase-chart" class="sparkline-canvas" style="height: 200px;"></canvas>
+    </div>
+
+    <div class="codebase-files">
+        <h3>Files</h3>
+        <table class="codebase-table" id="codebase-files-table">
+            <thead>
+                <tr>
+                    <th>Language</th>
+                    <th>Files</th>
+                    <th>Code</th>
+                    <th>Comments</th>
+                    <th>Ratio</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="codebase-files">
+        <h3>Top Files by Code Lines</h3>
+        <table class="codebase-table" id="top-files-table">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Language</th>
+                    <th>Code</th>
+                    <th>Comments</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="4">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function drawBarChart(canvasId, data, labels, colors) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    const w = rect.width;
+    const h = rect.height;
+
+    ctx.clearRect(0, 0, w, h);
+    if (!data || data.length === 0) {
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText('No data', w / 2 - 25, h / 2 + 5);
+        return;
+    }
+
+    const maxVal = Math.max(...data, 1);
+    const barCount = data.length;
+    const gap = Math.min(16, (w - 40) / (barCount * 3));
+    const barW = Math.max(20, (w - 40 - gap * (barCount - 1)) / barCount);
+    const padBot = 30;
+    const padTop = 10;
+    const chartH = h - padTop - padBot;
+
+    const palette = ['#58a6ff', '#3fb950', '#d29922', '#f97583', '#bc8cff', '#79c0ff'];
+
+    data.forEach((val, i) => {
+        const x = 20 + i * (barW + gap);
+        const barH = (val / maxVal) * chartH;
+        const y = padTop + chartH - barH;
+        const color = colors ? colors[i % colors.length] : palette[i % palette.length];
+
+        // Bar
+        ctx.fillStyle = color + 'cc';
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
+        ctx.fill();
+
+        // Value on top
+        ctx.fillStyle = '#f0f6fc';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(val, x + barW / 2, y - 5);
+
+        // Label below
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px -apple-system, sans-serif';
+        const label = labels[i] || '';
+        ctx.fillText(label.length > 8 ? label.slice(0, 7) + '…' : label, x + barW / 2, h - padBot + 14);
+    });
+    ctx.textAlign = 'start';
+}
+
+function loadCodebase() {
+    fetch('/api/codebase')
+        .then(r => r.json())
+        .then(resp => {
+            const cb = resp.codebase;
+            if (!cb) return;
+
+            // Summary
+            const summaryEl = document.getElementById('codebase-summary');
+            summaryEl.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${cb.total_files}</div>
+                        <div class="stat-label">Files</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${cb.total_code}</div>
+                        <div class="stat-label">Code Lines</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${cb.total_comments}</div>
+                        <div class="stat-label">Comment Lines</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${cb.languages}</div>
+                        <div class="stat-label">Languages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${cb.code_pct}%</div>
+                        <div class="stat-label">Code Density</div>
+                    </div>
+                </div>
+            `;
+
+            // Bar chart
+            const langNames = cb.languages_list.map(l => l.name);
+            const langCode = cb.languages_list.map(l => l.code);
+            drawBarChart('codebase-chart', langCode, langNames);
+
+            // Languages table
+            const tbody = document.querySelector('#codebase-files-table tbody');
+            tbody.innerHTML = cb.languages_list.map(l => {
+                const ratio = l.code > 0 ? (l.comments / l.code).toFixed(2) : '—';
+                return `<tr>
+                    <td>${l.name}</td>
+                    <td>${l.files}</td>
+                    <td>${l.code}</td>
+                    <td>${l.comments}</td>
+                    <td>${ratio}</td>
+                </tr>`;
+            }).join('');
+
+            // Top files table
+            const topTbody = document.querySelector('#top-files-table tbody');
+            topTbody.innerHTML = (cb.top_files || []).slice(0, 15).map(f =>
+                `<tr>
+                    <td><code>${f.file}</code></td>
+                    <td>${f.language}</td>
+                    <td>${f.code}</td>
+                    <td>${f.comments}</td>
+                </tr>`
+            ).join('') || '<tr><td colspan="4">No data</td></tr>';
+        })
+        .catch(() => {
+            document.getElementById('codebase-summary').innerHTML = '<p style="color: #f97583;">Failed to load codebase data.</p>';
+        });
+}
+
+loadCodebase();
+</script>
+{% endblock %}

@@ -174,23 +174,44 @@ function loadStats() {
 }
 
 function loadHistory() {
-    // Build hourly array from stats window
-    fetch('/api/stats')
-        .then(r => r.json())
-        .then(resp => {
-            const s = resp.stats;
-            if (!s) return;
-            // For now, show a single data point — sparkline fills up as we collect history
-            const pageviewsData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, s.pageviews || 0];
-            const visitorsData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, s.visitors || 0];
+    // Use real history from /api/stats/history
+    Promise.all([
+        fetch('/api/stats').then(r => r.json()),
+        fetch('/api/stats/history').then(r => r.json())
+    ]).then(([statsResp, historyResp]) => {
+        const s = statsResp.stats;
+        const history = historyResp.history || [];
 
+        // Deduplicate history by collected_at timestamp, keep unique entries
+        const seen = new Set();
+        const unique = history.filter(h => {
+            const key = (h.collected_at || h.ts || '');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        }).sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+
+        const pageviewsData = unique.map(h => h.pageviews || 0);
+        const visitorsData = unique.map(h => h.visitors || 0);
+        const visitsData = unique.map(h => h.visits || 0);
+
+        // Current window sparklines (use history data, or fall back to current stats)
+        if (pageviewsData.length > 1) {
             drawSparkline('sparkline-pageviews', pageviewsData, '#58a6ff', 'Pageviews');
             drawSparkline('sparkline-visitors', visitorsData, '#3fb950', 'Visitors');
+        } else if (s) {
+            drawSparkline('sparkline-pageviews', [s.pageviews || 0], '#58a6ff', 'Pageviews');
+            drawSparkline('sparkline-visitors', [s.visitors || 0], '#3fb950', 'Visitors');
+        } else {
+            drawSparkline('sparkline-pageviews', [], '#58a6ff', 'Pageviews');
+            drawSparkline('sparkline-visitors', [], '#3fb950', 'Visitors');
+        }
 
-            // Historical sparkline (combines all)
-            drawSparkline('sparkline-history', pageviewsData, '#d29922', 'History');
-        })
-        .catch(() => {});
+        // Historical sparkline (total_time or pageviews over time)
+        const totalTimeData = unique.map(h => h.total_time_seconds || 0);
+        drawSparkline('sparkline-history', totalTimeData.length > 1 ? totalTimeData : (s ? [s.total_time_seconds || 0] : []), '#d29922', 'Total Time');
+    })
+    .catch(() => {});
 }
 
 // Init

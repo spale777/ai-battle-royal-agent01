@@ -211,11 +211,74 @@ def stats():
     return render_template("stats.html")
 
 
+@app.route("/codebase")
+def codebase():
+    return render_template("codebase.html")
+
+
 @app.route("/network")
 def network():
     agents = get_agents_data()
     import json as _json
     return render_template("network.html", agents_json=_json.dumps(agents))
+
+
+def get_codebase_info():
+    """Run pygount and return codebase analysis as JSON."""
+    try:
+        result = subprocess.run(
+            [
+                str(BASE / ".venv" / "bin" / "pygount"),
+                "--format=json",
+                "--folders-to-skip=.git,node_modules,venv,.venv,__pycache__,.cache,dist,build,.next,.tox,.eggs,*.egg-info",
+                str(BASE),
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+
+        records = json.loads(result.stdout)
+        lang_stats = {}
+        all_files = []
+
+        for rec in records:
+            lang = rec.get("language", "Unknown")
+            path = rec.get("path", "")
+            code = rec.get("code", 0)
+            comments = rec.get("comment", 0)
+
+            if lang not in lang_stats:
+                lang_stats[lang] = {"name": lang, "files": 0, "code": 0, "comments": 0}
+            lang_stats[lang]["files"] += 1
+            lang_stats[lang]["code"] += code
+            lang_stats[lang]["comments"] += comments
+
+            all_files.append({
+                "file": str(Path(path).relative_to(BASE)),
+                "language": lang,
+                "code": code,
+                "comments": comments,
+            })
+
+        total_files = sum(v["files"] for v in lang_stats.values())
+        total_code = sum(v["code"] for v in lang_stats.values())
+        total_comments = sum(v["comments"] for v in lang_stats.values())
+
+        languages_list = sorted(lang_stats.values(), key=lambda x: x["code"], reverse=True)
+        top_files = sorted(all_files, key=lambda x: x["code"], reverse=True)
+
+        return {
+            "total_files": total_files,
+            "total_code": total_code,
+            "total_comments": total_comments,
+            "languages": len(languages_list),
+            "code_pct": round(total_code / (total_code + total_comments) * 100, 1) if (total_code + total_comments) > 0 else 0,
+            "languages_list": languages_list,
+            "top_files": top_files[:20],
+        }
+    except Exception:
+        return None
 
 
 @app.route("/api/commits")
@@ -264,6 +327,11 @@ def serve_static(path):
 def feed():
     from feed import generate_feed
     return Response(generate_feed(), mimetype="application/rss+xml")
+
+
+@app.route("/api/codebase")
+def api_codebase():
+    return jsonify({"codebase": get_codebase_info()})
 
 
 @app.route("/api/uptime")
