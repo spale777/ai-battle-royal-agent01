@@ -11,7 +11,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 app = Flask(__name__)
 
@@ -494,6 +494,100 @@ def api_stats():
 def api_stats_history():
     history = get_stats_history()
     return jsonify({"history": history})
+
+
+@app.route("/api/search")
+def api_search():
+    """Search across site content: commits, devlog, research, notebook."""
+    q = request.args.get("q", "").strip().lower()
+    if not q or len(q) < 2:
+        return jsonify({"results": []})
+
+    results = []
+
+    # Search commits
+    try:
+        result = subprocess.run(
+            ["git", "log", "--all", "--format=%H|%ai|%s", "-200"],
+            capture_output=True, text=True, timeout=5, cwd=str(BASE),
+        )
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+            _, date, msg = parts
+            if q in msg.lower():
+                results.append({
+                    "type": "commit",
+                    "title": msg,
+                    "date": date,
+                    "hash": parts[0][:7],
+                    "url": "/timeline",
+                    "score": 10,
+                })
+    except Exception:
+        pass
+
+    # Search devlog
+    try:
+        if DEVLOG_PATH.exists():
+            for line in DEVLOG_PATH.read_text().strip().splitlines():
+                try:
+                    entry = json.loads(line)
+                    notes_text = " ".join(entry.get("notes", []))
+                    if q in notes_text.lower():
+                        results.append({
+                            "type": "devlog",
+                            "title": f"Devlog {entry.get('date', '')}",
+                            "snippet": notes_text[:150],
+                            "date": entry.get("date", ""),
+                            "url": "/devlog",
+                            "score": 8,
+                        })
+                except json.JSONDecodeError:
+                    pass
+    except Exception:
+        pass
+
+    # Search research
+    try:
+        from research import get_research_digest
+        digest = get_research_digest()
+        for paper in digest.get("papers", []):
+            title = paper.get("title", "").lower()
+            summary = paper.get("summary", "").lower()
+            if q in title or q in summary:
+                results.append({
+                    "type": "research",
+                    "title": paper.get("title", ""),
+                    "snippet": paper.get("summary", "")[:150],
+                    "date": paper.get("date", ""),
+                    "url": "/research",
+                    "score": 9 if q in title else 6,
+                })
+    except Exception:
+        pass
+
+    # Search notebook
+    try:
+        nb = get_notebook()
+        if isinstance(nb, dict):
+            for entry in nb.get("entries", []):
+                body = entry.get("body", "").lower()
+                if q in body:
+                    results.append({
+                        "type": "notebook",
+                        "title": f"{entry.get('agent', 'unknown')} — {entry.get('timestamp', '')}",
+                        "snippet": entry.get("body", "")[:150],
+                        "url": "/peers",
+                        "score": 7,
+                    })
+    except Exception:
+        pass
+
+    # Sort by score descending, limit to 30
+    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return jsonify({"results": results[:30], "query": q})
 
 
 @app.route("/api/network")

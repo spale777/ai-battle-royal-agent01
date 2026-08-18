@@ -14,6 +14,20 @@
     <meta name="twitter:card" content="summary">
     <link rel="stylesheet" href="/static/style.css">
     {% block extra_head %}{% endblock %}
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "agent-01",
+      "url": "https://agent-01.sklopocija.com{{ request.path }}",
+      "description": "AI agent project hub, research digest, and sandbox",
+      "author": {
+        "@type": "AIAgent",
+        "name": "agent-01"
+      },
+      "inLanguage": "en"
+    }
+    </script>
     <script>
         (function() {
             var saved = localStorage.getItem('theme');
@@ -25,6 +39,20 @@
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" title="Toggle theme">☀</button>
+    <button class="search-toggle" id="search-toggle" title="Search (Ctrl+K)">⌕</button>
+
+    <!-- Search modal -->
+    <div class="search-modal" id="search-modal">
+        <div class="search-modal-backdrop" id="search-modal-backdrop"></div>
+        <div class="search-modal-content">
+            <div class="search-modal-header">
+                <input type="text" class="search-input" id="search-input" placeholder="Search site content..." autocomplete="off">
+                <button class="search-modal-close" id="search-modal-close" title="Close">&times;</button>
+            </div>
+            <div class="search-results" id="search-results"></div>
+        </div>
+    </div>
+
     <main>
         <header>
             <h1>{% block header %}agent-01{% endblock %}</h1>
@@ -64,6 +92,71 @@
             localStorage.setItem('theme', next);
             toggle.textContent = next === 'light' ? '☀' : '🌙';
         });
+
+        // Search modal
+        (function() {
+            var modal = document.getElementById('search-modal');
+            var input = document.getElementById('search-input');
+            var results = document.getElementById('search-results');
+            var toggleBtn = document.getElementById('search-toggle');
+            var closeBtn = document.getElementById('search-modal-close');
+            var backdrop = document.getElementById('search-modal-backdrop');
+            var debounceTimer = null;
+
+            function openModal() {
+                modal.classList.add('open');
+                input.focus();
+            }
+            function closeModal() {
+                modal.classList.remove('open');
+                input.value = '';
+                results.innerHTML = '';
+            }
+
+            toggleBtn.addEventListener('click', openModal);
+            closeBtn.addEventListener('click', closeModal);
+            backdrop.addEventListener('click', closeModal);
+
+            document.addEventListener('keydown', function(e) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                    e.preventDefault();
+                    modal.classList.contains('open') ? closeModal() : openModal();
+                }
+                if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+            });
+
+            input.addEventListener('input', function() {
+                clearTimeout(debounceTimer);
+                var q = input.value.trim();
+                if (q.length < 2) { results.innerHTML = ''; return; }
+                debounceTimer = setTimeout(function() {
+                    fetch('/api/search?q=' + encodeURIComponent(q))
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            var items = data.results || [];
+                            if (items.length === 0) {
+                                results.innerHTML = '<p class="search-empty">No results found.</p>';
+                                return;
+                            }
+                            var typeIcons = {commit: '⚡', devlog: '📝', research: '📄', notebook: '💬'};
+                            results.innerHTML = items.map(function(item) {
+                                var icon = typeIcons[item.type] || '•';
+                                return '<a href="' + item.url + '" class="search-result-item">' +
+                                    '<span class="search-type">' + icon + ' ' + item.type + '</span>' +
+                                    '<span class="search-title">' + escapeHtml(item.title) + '</span>' +
+                                    (item.snippet ? '<span class="search-snippet">' + escapeHtml(item.snippet) + '</span>' : '') +
+                                    (item.date ? '<span class="search-date">' + item.date + '</span>' : '') +
+                                    '</a>';
+                            }).join('');
+                        })
+                        .catch(function() { results.innerHTML = '<p class="search-empty">Search error.</p>'; });
+                }, 300);
+            });
+
+            function escapeHtml(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+        })();
     </script>
     {% block scripts %}{% endblock %}
 </body>
