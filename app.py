@@ -18,6 +18,82 @@ app = Flask(__name__)
 BASE = Path(__file__).parent
 START_TIME = datetime.datetime.now(datetime.timezone.utc)
 STATS_HISTORY_PATH = BASE / "stats_history.jsonl"
+ANALYTICS_PATH = BASE / "analytics.jsonl"
+
+
+@app.after_request
+def track_pageview(response):
+    """Log page views to analytics JSONL (skip bots, API, and static)."""
+    if request.path.startswith(("/api/", "/feed.xml", "/sitemap.xml", "/robots.txt", "/static/")):
+        return response
+    ua = request.headers.get("User-Agent", "")
+    if any(bot in ua.lower() for bot in ("bot", "crawl", "spider", "guzzle")):
+        return response
+    try:
+        entry = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "path": request.path,
+            "referer": request.headers.get("Referer", ""),
+            "ip": request.remote_addr or "",
+        }
+        with open(ANALYTICS_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+    return response
+
+
+def get_analytics_data():
+    """Read analytics from JSONL and return aggregated data."""
+    if not ANALYTICS_PATH.exists():
+        return {"total": 0, "pages": {}, "hourly": [], "recent": []}
+    try:
+        lines = ANALYTICS_PATH.read_text().strip().splitlines()
+        entries = []
+        for l in lines:
+            if not l.strip():
+                continue
+            try:
+                entries.append(json.loads(l))
+            except json.JSONDecodeError:
+                pass
+
+        total = len(entries)
+        page_counts = {}
+        for e in entries:
+            p = e.get("path", "/")
+            page_counts[p] = page_counts.get(p, 0) + 1
+
+        # Hourly buckets (last 48 hours)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        hourly = {}
+        for e in entries:
+            try:
+                ts = e.get("ts", "")
+                dt = datetime.datetime.fromisoformat(ts)
+                hour_key = dt.strftime("%Y-%m-%d %H:00")
+                hourly[hour_key] = hourly.get(hour_key, 0) + 1
+            except Exception:
+                pass
+
+        # Fill empty hours for last 48h
+        for i in range(48):
+            h = now - datetime.timedelta(hours=i)
+            key = h.strftime("%Y-%m-%d %H:00")
+            if key not in hourly:
+                hourly[key] = 0
+
+        hourly_list = sorted(hourly.items(), key=lambda x: x[0])
+        recent = list(reversed(entries[-20:]))
+
+        return {
+            "total": total,
+            "pages": dict(sorted(page_counts.items(), key=lambda x: x[1], reverse=True)),
+            "hourly": [{"hour": h[0], "views": h[1]} for h in hourly_list],
+            "recent": recent,
+        }
+    except Exception:
+        return {"total": 0, "pages": {}, "hourly": [], "recent": []}
 
 
 def get_git_info():
@@ -219,6 +295,16 @@ def codebase():
 @app.route("/demos")
 def demos():
     return render_template("demos.html")
+
+
+@app.route("/analytics")
+def analytics():
+    return render_template("analytics.html")
+
+
+@app.route("/api/analytics")
+def api_analytics():
+    return jsonify(get_analytics_data())
 
 
 @app.route("/timeline")

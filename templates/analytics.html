@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}analytics — agent-01{% endblock %}
+{% block header %}analytics{% endblock %}
+{% block tagline %}<p class="tagline">Server-side page view tracking</p>{% endblock %}
+
+{% block content %}
+<section>
+    <div class="stats-grid" id="analytics-summary">
+        <div class="stat-card">
+            <div class="stat-value">—</div>
+            <div class="stat-label">Total Views</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">—</div>
+            <div class="stat-label">Unique Pages</div>
+        </div>
+    </div>
+
+    <div class="sparkline-wrap">
+        <h3>Views by Hour (last 48h)</h3>
+        <canvas id="analytics-hourly" class="sparkline-canvas" style="height: 150px;"></canvas>
+    </div>
+
+    <div class="codebase-files">
+        <h3>Top Pages</h3>
+        <table class="codebase-table" id="analytics-pages">
+            <thead><tr><th>Path</th><th>Views</th></tr></thead>
+            <tbody><tr><td colspan="2">Loading...</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="codebase-files">
+        <h3>Recent Views</h3>
+        <table class="codebase-table" id="analytics-recent">
+            <thead><tr><th>Time</th><th>Path</th><th>Referer</th></tr></thead>
+            <tbody><tr><td colspan="3">Loading...</td></tr></tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadAnalytics() {
+    fetch('/api/analytics')
+        .then(r => r.json())
+        .then(data => {
+            // Summary
+            var summary = document.getElementById('analytics-summary');
+            var uniquePages = Object.keys(data.pages || {}).length;
+            summary.innerHTML =
+                '<div class="stat-card"><div class="stat-value">' + data.total + '</div><div class="stat-label">Total Views</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + uniquePages + '</div><div class="stat-label">Unique Pages</div></div>';
+
+            // Hourly chart
+            var hourly = data.hourly || [];
+            if (hourly.length > 0) {
+                var hours = hourly.map(function(h) { return h.hour.split(' ')[1].replace(':00', ''); });
+                var views = hourly.map(function(h) { return h.views; });
+                drawBarChart('analytics-hourly', views, hours);
+            }
+
+            // Top pages
+            var pages = data.pages || {};
+            var pageKeys = Object.keys(pages);
+            var tbody = document.querySelector('#analytics-pages tbody');
+            if (pageKeys.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2">No data yet.</td></tr>';
+            } else {
+                tbody.innerHTML = pageKeys.map(function(p) {
+                    return '<tr><td><code>' + p + '</code></td><td>' + pages[p] + '</td></tr>';
+                }).join('');
+            }
+
+            // Recent
+            var recent = data.recent || [];
+            var rbody = document.querySelector('#analytics-recent tbody');
+            if (recent.length === 0) {
+                rbody.innerHTML = '<tr><td colspan="3">No data yet.</td></tr>';
+            } else {
+                rbody.innerHTML = recent.map(function(e) {
+                    var ts = e.ts ? e.ts.replace('T', ' ').substring(0, 19) : '';
+                    var ref = e.referer || '—';
+                    if (ref.length > 60) ref = ref.substring(0, 57) + '…';
+                    return '<tr><td>' + ts + '</td><td><code>' + e.path + '</code></td><td>' + ref + '</td></tr>';
+                }).join('');
+            }
+        })
+        .catch(function() {
+            document.getElementById('analytics-summary').innerHTML = '<p style="color:#f97583">Failed to load analytics.</p>';
+        });
+}
+
+function drawBarChart(canvasId, data, labels) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    var w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+    if (!data || data.length === 0) return;
+
+    var maxVal = Math.max.apply(null, data.concat([1]));
+    var n = data.length;
+    var gap = Math.min(2, (w - 40) / (n * 2));
+    var bw = Math.max(1, (w - 40 - gap * (n-1)) / n);
+    var padBot = 24, padTop = 8, chartH = h - padTop - padBot;
+
+    data.forEach(function(val, i) {
+        var x = 20 + i * (bw + gap);
+        var bh = (val / maxVal) * chartH;
+        var y = padTop + chartH - bh;
+        ctx.fillStyle = val > 0 ? '#58a6ffcc' : '#30363d';
+        ctx.fillRect(x, y, bw, bh);
+    });
+}
+
+loadAnalytics();
+</script>
+{% endblock %}
