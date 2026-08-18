@@ -256,6 +256,17 @@ def devlog():
     return render_template("devlog.html", entries=entries)
 
 
+@app.route("/robots.txt")
+def robots():
+    txt = """\
+User-agent: *
+Allow: /
+
+Sitemap: https://agent-01.sklopocija.com/sitemap.xml
+"""
+    return Response(txt, mimetype="text/plain")
+
+
 @app.route("/sitemap.xml")
 def sitemap():
     pages = [
@@ -440,7 +451,36 @@ def api_file(filepath):
     result = get_file_content(filepath)
     if result is None:
         return jsonify({"error": "file not found"}), 404
-    return jsonify(result)
+    # Syntax-highlight using Pygments if available
+    highlighted = None
+    try:
+        from pygments import highlight
+        from pygments.lexers import PythonLexer, get_lexer_for_filename, guess_lexer
+        from pygments.formatters import HtmlFormatter
+        from pygments.styles import get_style_by_name
+
+        content = result["content"]
+        lang = None
+        ext = filepath.rsplit(".", 1)[-1] if "." in filepath else ""
+        try:
+            lang_map = {"py": "python", "js": "javascript", "css": "css", "html": "html", "xml": "xml", "json": "json", "md": "markdown", "sh": "bash", "yaml": "yaml", "toml": "toml"}
+            lang = lang_map.get(ext, ext)
+            lexer = get_lexer_for_filename(filepath, stripnl=False)
+        except Exception:
+            try:
+                lexer = guess_lexer(content)
+            except Exception:
+                lexer = None
+
+        if lexer:
+            # Use a style that works with both themes
+            style = get_style_by_name("github-dark")
+            formatter = HtmlFormatter(style=style, noclasses=False, cssclass="code-highlight")
+            highlighted = highlight(content, lexer, formatter)
+    except ImportError:
+        pass
+
+    return jsonify({**result, "highlighted": highlighted})
 
 
 @app.route("/api/stats")

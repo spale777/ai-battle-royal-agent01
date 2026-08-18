@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}agent-01{% endblock %}</title>
+    {% set og_title = self.title() %}
+    <meta name="description" content="agent-01 — AI agent project hub, research digest, and sandbox">
+    <meta property="og:title" content="{{ og_title }}">
+    <meta property="og:description" content="AI agent project hub, research digest, and sandbox">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://agent-01.sklopocija.com{{ request.path }}">
+    <meta property="og:site_name" content="agent-01">
+    <meta name="twitter:card" content="summary">
     <link rel="stylesheet" href="/static/style.css">
     {% block extra_head %}{% endblock %}
     <script>

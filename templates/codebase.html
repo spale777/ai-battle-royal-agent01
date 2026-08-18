@@ -51,6 +51,20 @@
         </table>
     </div>
 </section>
+
+<!-- File viewer modal -->
+<div class="codebase-modal" id="file-modal">
+    <div class="codebase-modal-backdrop" id="file-modal-backdrop"></div>
+    <div class="codebase-modal-content">
+        <div class="codebase-modal-header">
+            <span class="codebase-modal-path" id="file-modal-path"></span>
+            <button class="codebase-modal-close" id="file-modal-close" title="Close">&times;</button>
+        </div>
+        <div class="codebase-modal-body" id="file-modal-body">
+            <p class="text-muted">Loading file...</p>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -164,11 +178,11 @@ function loadCodebase() {
                 </tr>`;
             }).join('');
 
-            // Top files table
+            // Top files table (clickable)
             const topTbody = document.querySelector('#top-files-table tbody');
             topTbody.innerHTML = (cb.top_files || []).slice(0, 15).map(f =>
                 `<tr>
-                    <td><code>${f.file}</code></td>
+                    <td><code class="file-link" data-file="${f.file}">${f.file}</code></td>
                     <td>${f.language}</td>
                     <td>${f.code}</td>
                     <td>${f.comments}</td>
@@ -179,6 +193,52 @@ function loadCodebase() {
             document.getElementById('codebase-summary').innerHTML = '<p style="color: #f97583;">Failed to load codebase data.</p>';
         });
 }
+
+// File viewer modal
+const fileModal = document.getElementById('file-modal');
+const fileModalPath = document.getElementById('file-modal-path');
+const fileModalBody = document.getElementById('file-modal-body');
+const fileModalClose = document.getElementById('file-modal-close');
+const fileModalBackdrop = document.getElementById('file-modal-backdrop');
+
+function closeModal() {
+    if (fileModal) fileModal.classList.remove('open');
+}
+
+function openFile(filepath) {
+    if (!fileModal) return;
+    fileModalPath.textContent = filepath;
+    fileModalBody.innerHTML = '<p class="text-muted">Loading file...</p>';
+    fileModal.classList.add('open');
+    fetch('/api/file/' + encodeURIComponent(filepath))
+        .then(r => r.json())
+        .then(data => {
+            if (data.highlighted) {
+                fileModalBody.innerHTML = '<div class="code-highlight-wrap">' + data.highlighted + '</div>';
+            } else if (data.content !== undefined) {
+                fileModalBody.innerHTML = '<pre><code>' + escapeHtml(data.content) + '</code></pre>';
+            } else {
+                fileModalBody.innerHTML = '<p class="text-muted">File not found.</p>';
+            }
+        })
+        .catch(() => {
+            fileModalBody.innerHTML = '<p style="color: #f97583;">Failed to load file.</p>';
+        });
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.addEventListener('click', function(e) {
+    if (e.target.matches('.file-link')) {
+        openFile(e.target.dataset.file);
+    }
+});
+
+if (fileModalClose) fileModalClose.addEventListener('click', closeModal);
+if (fileModalBackdrop) fileModalBackdrop.addEventListener('click', closeModal);
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
 
 loadCodebase();
 </script>

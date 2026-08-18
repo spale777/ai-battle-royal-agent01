@@ -792,3 +792,188 @@ code {
     color: #f0f6fc;
     margin-bottom: 0.5rem;
 }
+
+/* --- Codebase Modal --- */
+.codebase-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+
+.codebase-modal.open {
+    display: flex;
+}
+
+.codebase-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+}
+
+.codebase-modal-content {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 800px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.codebase-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.codebase-modal-path {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.codebase-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    transition: color 0.15s;
+}
+
+.codebase-modal-close:hover {
+    color: var(--text);
+}
+
+.codebase-modal-body {
+    overflow: auto;
+    padding: 1rem;
+    flex: 1;
+}
+
+.file-link {
+    color: var(--accent) !important;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.file-link:hover {
+    color: var(--green) !important;
+    text-decoration: underline;
+}
+
+/* Pygments highlight wrap */
+.code-highlight-wrap {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    overflow-x: auto;
+}
+
+.code-highlight-wrap pre {
+    margin: 0;
+    padding: 0;
+}
+
+.code-highlight-wrap .hll {
+    background: rgba(255, 255, 0, 0.1);
+}
+
+.code-highlight-wrap .k,
+.code-highlight-wrap .kd,
+.code-highlight-wrap .kn,
+.code-highlight-wrap .kp,
+.code-highlight-wrap .kw {
+    color: #ff7b72;
+}
+
+.code-highlight-wrap .s,
+.code-highlight-wrap .s1,
+.code-highlight-wrap .s2,
+.code-highlight-wrap .sa,
+.code-highlight-wrap .sb,
+.code-highlight-wrap .sc,
+.code-highlight-wrap .dl,
+.code-highlight-wrap .sd,
+.code-highlight-wrap .s2,
+.code-highlight-wrap .se,
+.code-highlight-wrap .sh,
+.code-highlight-wrap .si,
+.code-highlight-wrap .sx,
+.code-highlight-wrap .sr,
+.code-highlight-wrap .s1,
+.code-highlight-wrap .ss,
+.code-highlight-wrap .m,
+.code-highlight-wrap .mb,
+.code-highlight-wrap .mf,
+.code-highlight-wrap .mh,
+.code-highlight-wrap .mi,
+.code-highlight-wrap .mo {
+    color: #a5d6ff;
+}
+
+.code-highlight-wrap .c,
+.code-highlight-wrap .ch,
+.code-highlight-wrap .cm,
+.code-highlight-wrap .c1,
+.code-highlight-wrap .cs {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.code-highlight-wrap .o,
+.code-highlight-wrap .ow {
+    color: #ff7b72;
+}
+
+.code-highlight-wrap .p {
+    color: var(--text);
+}
+
+.code-highlight-wrap .n,
+.code-highlight-wrap .nn,
+.code-highlight-wrap .nx {
+    color: var(--text);
+}
+
+.code-highlight-wrap .nc,
+.code-highlight-wrap .ne {
+    color: #ffa657;
+}
+
+.code-highlight-wrap .nf,
+.code-highlight-wrap .fm {
+    color: #d2a8ff;
+}
+
+.code-highlight-wrap .ni {
+    color: #ffa657;
+}
+
+.code-highlight-wrap .bp {
+    color: #79c0ff;
+}
+
+.code-highlight-wrap .gd {
+    color: #f97583;
+}
+
+.code-highlight-wrap .gi {
+    color: #7ee787;
+}
