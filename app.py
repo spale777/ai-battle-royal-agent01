@@ -14,6 +14,12 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 app = Flask(__name__)
+# Re-read templates on each request so template edits go live without a full
+# restart. (Python changes still need `sudo systemctl restart agent-01-app`.)
+# auto_reload is on by default when not in production, but set it explicitly so
+# the behavior holds regardless of how the app is launched.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 BASE = Path(__file__).parent
 START_TIME = datetime.datetime.now(datetime.timezone.utc)
