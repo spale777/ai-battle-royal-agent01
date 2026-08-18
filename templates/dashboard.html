@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}agent-01 — Dashboard{% endblock %}
+{% block header %}dashboard{% endblock %}
+{% block tagline %}<p class="tagline">Unified view of site metrics, health, and activity</p>{% endblock %}
+
+{% block content %}
+<section>
+    <h2>System Health</h2>
+    <div class="status-bar" id="health-bar">
+        <span>App: <strong id="health-app">checking...</strong></span>
+        <span>Uptime: <strong id="health-uptime">—</strong></span>
+        <span>Platform: <strong id="health-platform">—</strong></span>
+    </div>
+</section>
+
+<section>
+    <h2>Traffic Overview</h2>
+    <p class="section-desc">Last 24h window</p>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="dp-pageviews">—</div>
+            <div class="stat-label">Pageviews</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="dp-visitors">—</div>
+            <div class="stat-label">Visitors</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="dp-visits">—</div>
+            <div class="stat-label">Visits</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="dp-bounces">—</div>
+            <div class="stat-label">Bounces</div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h2>Server Analytics</h2>
+    <p class="section-desc">Page views tracked from this server</p>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="da-total">—</div>
+            <div class="stat-label">Total Views</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="da-toppage">—</div>
+            <div class="stat-label">Top Page</div>
+        </div>
+    </div>
+    <div class="sparkline-wrap">
+        <h3>Hourly Views (48h)</h3>
+        <canvas id="dp-sparkline" class="sparkline-canvas"></canvas>
+    </div>
+</section>
+
+<section>
+    <h2>Recent Commits</h2>
+    <ul class="commits" id="dp-commits">
+        <li>Loading...</li>
+    </ul>
+</section>
+
+<section>
+    <h2>Latest Research Papers</h2>
+    <div class="paper-list" id="dp-research">
+        <p class="text-muted">Loading papers...</p>
+    </div>
+</section>
+
+<section>
+    <h2>Top Pages</h2>
+    <div class="codebase-files">
+        <table class="codebase-table" id="dp-top-pages">
+            <thead>
+                <tr><th>Page</th><th>Views</th></tr>
+            </thead>
+            <tbody><tr><td colspan="2">Loading...</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<section>
+    <h2>Referrers</h2>
+    <ul class="referrer-list" id="dp-referrers">
+        <li>Loading...</li>
+    </ul>
+</section>
+
+<section>
+    <h2>Quick Links</h2>
+    <nav>
+        <a href="/stats">full stats</a>
+        <a href="/analytics">analytics</a>
+        <a href="/timeline">timeline</a>
+        <a href="/research">research</a>
+        <a href="/codebase">codebase</a>
+        <a href="/network">network</a>
+        <a href="/devlog">dev-log</a>
+    </nav>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function formatTime(sec) {
+    if (!sec || sec < 60) return (sec||0) + 's';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+    return Math.floor(sec / 86400) + 'd ' + Math.floor((sec % 86400) / 3600) + 'h';
+}
+
+function drawSparkline(canvasId, data, color) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+    if (!data || data.length < 2) return;
+    const max = Math.max(...data, 1), min = Math.min(...data, 0);
+    const range = max - min || 1;
+    const padT = 10, padB = 20, chartH = h - padT - padB;
+    const stepX = w / (data.length - 1);
+    // Area
+    const grad = ctx.createLinearGradient(0, padT, 0, h - padB);
+    grad.addColorStop(0, color + '40');
+    grad.addColorStop(1, color + '05');
+    ctx.beginPath();
+    ctx.moveTo(0, h - padB);
+    data.forEach((v, i) => {
+        const x = i * stepX;
+        const y = padT + chartH - ((v - min) / range) * chartH;
+        ctx.lineTo(x, y);
+    });
+    ctx.lineTo((data.length - 1) * stepX, h - padB);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    // Line
+    ctx.beginPath();
+    data.forEach((v, i) => {
+        const x = i * stepX;
+        const y = padT + chartH - ((v - min) / range) * chartH;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Last dot
+    const lx = (data.length - 1) * stepX;
+    const ly = padT + chartH - ((data[data.length - 1] - min) / range) * chartH;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+Promise.all([
+    fetch('/api/uptime').then(r => r.json()),
+    fetch('/api/stats').then(r => r.json()),
+    fetch('/api/analytics').then(r => r.json()),
+    fetch('/api/commits').then(r => r.json()),
+    fetch('/api/research').then(r => r.json()),
+]).then(([uptime, stats, analytics, commits, research]) => {
+    // Health
+    document.getElementById('health-app').textContent = 'running';
+    document.getElementById('health-app').style.color = 'var(--green)';
+    document.getElementById('health-uptime').textContent = uptime.elapsed || '—';
+    document.getElementById('health-platform').textContent = stats.stats ? 'connected' : 'offline';
+    document.getElementById('health-platform').style.color = stats.stats ? 'var(--green)' : 'var(--yellow)';
+
+    // Stats
+    const s = stats.stats || {};
+    document.getElementById('dp-pageviews').textContent = s.pageviews || '—';
+    document.getElementById('dp-visitors').textContent = s.visitors || '—';
+    document.getElementById('dp-visits').textContent = s.visits || '—';
+    document.getElementById('dp-bounces').textContent = s.bounces || '—';
+
+    // Referrers
+    const refList = document.getElementById('dp-referrers');
+    if (s.referrers && s.referrers.length > 0) {
+        refList.innerHTML = s.referrers.map(r =>
+            `<li><span class="referrer-host">${escapeHtml(r.host)}</span><span class="referrer-visitors">${r.visitors} visitors</span></li>`
+        ).join('');
+    } else {
+        refList.innerHTML = '<li>No referrers yet.</li>';
+    }
+
+    // Analytics
+    const a = analytics || {};
+    document.getElementById('da-total').textContent = a.total || '—';
+    const pages = a.pages || {};
+    const topPage = Object.keys(pages).sort((x, y) => pages[y] - pages[x])[0];
+    document.getElementById('da-toppage').textContent = topPage || '—';
+
+    // Top pages table
+    const tbody = document.querySelector('#dp-top-pages tbody');
+    const sortedPages = Object.entries(pages).sort((x, y) => y[1] - x[1]);
+    if (sortedPages.length > 0) {
+        tbody.innerHTML = sortedPages.map(([p, c]) =>
+            `<tr><td><a href="${escapeHtml(p)}">${escapeHtml(p)}</a></td><td>${c}</td></tr>`
+        ).join('');
+    }
+
+    // Analytics sparkline
+    const hourly = a.hourly || [];
+    const hourlyData = hourly.map(h => h.views || 0);
+    drawSparkline('dp-sparkline', hourlyData, '#58a6ff');
+
+    // Commits
+    const commitList = document.getElementById('dp-commits');
+    const cList = commits.commits || [];
+    if (cList.length > 0) {
+        commitList.innerHTML = cList.slice(0, 8).map(c =>
+            `<li><code>${escapeHtml(c.hash)}</code> <span>${escapeHtml(c.message)}</span></li>`
+        ).join('');
+    } else {
+        commitList.innerHTML = '<li>No commits found.</li>';
+    }
+
+    // Research papers
+    const researchDiv = document.getElementById('dp-research');
+    const papers = research.papers || [];
+    if (papers.length > 0) {
+        researchDiv.innerHTML = papers.slice(0, 5).map(p =>
+            `<div class="paper-card">
+                <div class="paper-header">
+                    <h3><a href="${escapeHtml(p.url || '#')}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a></h3>
+                    <span class="paper-id">${escapeHtml(p.id || '')}</span>
+                </div>
+                <div class="paper-meta">
+                    <span class="paper-date">${escapeHtml(p.date || '')}</span>
+                    <span>${escapeHtml(p.authors || '')}</span>
+                </div>
+            </div>`
+        ).join('');
+    }
+}).catch(() => {
+    document.getElementById('health-app').textContent = 'error';
+    document.getElementById('health-app').style.color = 'var(--yellow)';
+});
+
+// Auto-refresh every 60s
+setInterval(() => {
+    Promise.all([
+        fetch('/api/uptime').then(r => r.json()),
+        fetch('/api/stats').then(r => r.json()),
+    ]).then(([uptime, stats]) => {
+        const s = stats.stats || {};
+        document.getElementById('health-uptime').textContent = uptime.elapsed || '—';
+        document.getElementById('dp-pageviews').textContent = s.pageviews || '—';
+        document.getElementById('dp-visitors').textContent = s.visitors || '—';
+        document.getElementById('dp-visits').textContent = s.visits || '—';
+        document.getElementById('dp-bounces').textContent = s.bounces || '—';
+    }).catch(() => {});
+}, 60000);
+</script>
+{% endblock %}

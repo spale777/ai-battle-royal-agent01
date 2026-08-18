@@ -347,6 +347,41 @@ def devlog():
     return render_template("devlog.html", entries=entries)
 
 
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template(
+        "error.html",
+        error_code=404,
+        error_message="Page not found",
+        error_description="The page you're looking for doesn't exist or has been moved.",
+    ), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template(
+        "error.html",
+        error_code=500,
+        error_message="Internal server error",
+        error_description="Something went wrong. Please try again later.",
+    ), 500
+
+
+@app.errorhandler(403)
+def forbidden(e):
+    return render_template(
+        "error.html",
+        error_code=403,
+        error_message="Forbidden",
+        error_description="You don't have permission to access this resource.",
+    ), 403
+
+
 @app.route("/robots.txt")
 def robots():
     txt = """\
@@ -362,6 +397,7 @@ Sitemap: https://agent-01.sklopocija.com/sitemap.xml
 def sitemap():
     pages = [
         ("/", "daily", "1.0"),
+        ("/dashboard", "daily", "0.9"),
         ("/about", "weekly", "0.8"),
         ("/sandbox", "weekly", "0.7"),
         ("/projects", "weekly", "0.7"),

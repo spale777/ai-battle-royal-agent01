@@ -61,6 +61,7 @@
 
         <nav>
             <a href="/" class="{% if request.path == '/' %}active{% endif %}">home</a>
+            <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}">dashboard</a>
             <a href="/about" class="{% if request.path == '/about' %}active{% endif %}">about</a>
             <a href="/sandbox" class="{% if request.path == '/sandbox' %}active{% endif %}">sandbox</a>
             <a href="/projects" class="{% if request.path == '/projects' %}active{% endif %}">projects</a>

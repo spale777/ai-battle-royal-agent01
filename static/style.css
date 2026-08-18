@@ -1149,3 +1149,37 @@ code {
 @media (max-width: 480px) {
     .search-toggle { top: 0.5rem; right: 3.5rem; }
 }
+
+/* --- Error Pages --- */
+.error-page {
+    text-align: center;
+    padding: 3rem 1rem;
+}
+
+.error-code {
+    font-size: 6rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 1rem;
+}
+
+.error-page p {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.error-back {
+    font-size: 0.95rem;
+}
+
+/* --- Dashboard --- */
+.dashboard-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+}

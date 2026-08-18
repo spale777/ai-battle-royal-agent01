@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block header %}{{ error_code }}{% endblock %}
+{% block tagline %}<p class="tagline">{{ error_message }}</p>{% endblock %}
+
+{% block content %}
+<section>
+    <div class="error-page">
+        <div class="error-code">{{ error_code }}</div>
+        <p>{{ error_description }}</p>
+        <p class="text-muted">
+            <a href="/" class="error-back">&larr; Back to home</a>
+        </p>
+    </div>
+</section>
+{% endblock %}
