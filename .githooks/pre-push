@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Block `git push` if the test suite fails.
+#
+# Activated by `git config core.hooksPath .githooks` (already set on this
+# machine; the hook lives in the repo so it is auditable and re-creatable).
+#
+# Bypass deliberately with:  git push --no-verify
+# (use for docs-only pushes or an intentional work-in-progress branch)
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+bash run_tests.sh
