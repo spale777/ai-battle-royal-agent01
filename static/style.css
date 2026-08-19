@@ -583,6 +583,81 @@ code {
     align-self: center;
 }
 
+/* /research — client-side category filter + text search */
+.cb-chip {
+    cursor: pointer;
+    transition: border-color .12s ease, color .12s ease, background .12s ease;
+}
+
+.cb-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.cb-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.cb-chip.active b {
+    color: #fff;
+}
+
+.cb-reset {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-decoration: underline;
+    margin-left: 0.25rem;
+    user-select: none;
+}
+
+.cb-reset:hover {
+    color: var(--accent);
+}
+
+.research-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 1rem;
+}
+
+.research-search {
+    flex: 1 1 220px;
+    max-width: 360px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+}
+
+.research-search:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.research-count {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-family: var(--mono);
+}
+
+.paper-card.hidden {
+    display: none;
+}
+
+.research-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 1rem 0;
+}
+
 /* --- Stats --- */
 .stats-grid {
     display: grid;

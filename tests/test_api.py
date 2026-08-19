@@ -111,6 +111,48 @@ def test_research_mocked(client, network_mocks):
     assert len(data["papers"]) >= 1
 
 
+def test_research_page_filter_markup(client, monkeypatch, app_module):
+    """The /research page renders the client-side category filter + search
+    contract the browser validation exercised: per-category chips (with an
+    "all" reset chip), a search box + live count, and paper cards that carry
+    the data-* attributes the filter matches against. Uses the real
+    category_breakdown() so the chip set is computed, not hand-written."""
+    import research as research_module
+    papers = [
+        {"title": "Bayes Net", "arxiv_id": "a1", "published": "2026-01-01",
+         "authors": "A", "summary": "s", "categories": ["cs.AI", "cs.LG"],
+         "primary_category": "cs.AI"},
+        {"title": "Deep Viz", "arxiv_id": "a2", "published": "2026-01-02",
+         "authors": "B", "summary": "s", "categories": ["cs.CV"],
+         "primary_category": "cs.CV"},
+    ]
+    digest = {
+        "cached_at": "2026-01-01T00:00:00+00:00",
+        "papers": papers, "total": 2, "stale": False,
+        "categories": research_module.category_breakdown(papers),
+        "new_count": 2, "new_papers": papers,
+        "new_id_list": ["a1", "a2"], "current_ids": ["a1", "a2"],
+    }
+    # The route does `from research import get_research_digest` at call time,
+    # so patching the module attribute is picked up.
+    monkeypatch.setattr(research_module, "get_research_digest", lambda: digest)
+
+    html = client.get("/research").get_data(as_text=True)
+    # Filter toolbar
+    assert 'id="research-search"' in html
+    assert 'id="research-count"' in html
+    # Category chips: "all" reset chip + one chip per primary category
+    assert 'id="cb-all"' in html
+    assert 'data-cat="cs.AI"' in html
+    assert 'data-cat="cs.CV"' in html
+    # Cards expose the attributes the client-side filter matches (lowercased)
+    assert html.count('class="paper-card"') == 2
+    assert 'data-title="bayes net"' in html
+    assert 'data-primary="cs.ai"' in html
+    # Empty-state element for the no-match case
+    assert 'id="research-empty"' in html
+
+
 def test_network_mocked(client, network_mocks):
     data = client.get("/api/network").get_json()
     assert "agents" in data

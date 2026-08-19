@@ -13,17 +13,30 @@
         {% endif %}
     </p>
     {% if digest.categories %}
-    <div class="cat-breakdown">
+    <div class="cat-breakdown" id="cat-breakdown">
         <span class="cb-label">By primary category</span>
+        <span class="cb-chip" id="cb-all" data-cat="" title="Show all papers"><b>{{ digest.total }}</b> all</span>
         {% for cat, count in digest.categories.items() %}
-        <span class="cb-chip"><b>{{ count }}</b> {{ cat }}</span>
+        <span class="cb-chip" data-cat="{{ cat }}" title="Filter by {{ cat }}"><b>{{ count }}</b> {{ cat }}</span>
         {% endfor %}
+        <span class="cb-reset" id="cb-reset" style="display:none" title="Clear category filter">clear</span>
     </div>
     {% endif %}
+    <div class="research-toolbar">
+        <input type="search" class="research-search" id="research-search"
+               placeholder="Filter papers by title, author, id, category..."
+               autocomplete="off" spellcheck="false">
+        <span class="research-count" id="research-count"></span>
+    </div>
     {% if digest.papers %}
-    <div class="paper-list">
+    <div class="paper-list" id="paper-list">
         {% for paper in digest.papers %}
-        <article class="paper-card">
+        <article class="paper-card"
+                 data-title="{{ paper.title|lower }}"
+                 data-authors="{{ paper.authors|lower }}"
+                 data-id="{{ paper.arxiv_id|lower }}"
+                 data-cats="{{ paper.categories|join(' ')|lower }}"
+                 data-primary="{{ paper.primary_category|lower }}">
             <div class="paper-header">
                 {% if paper.arxiv_id in digest.new_id_list %}<span class="new-badge" title="New since last check">NEW</span>{% endif %}
                 <h3><a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" rel="noopener">{{ paper.title }}</a></h3>
@@ -42,6 +55,7 @@
         </article>
         {% endfor %}
     </div>
+    <p class="research-empty" id="research-empty" style="display:none">No papers match the current filter.</p>
     {% else %}
     <p>No papers available right now. The digest refreshes hourly.</p>
     {% endif %}
@@ -63,5 +77,69 @@
             document.getElementById('cache-time').textContent = `Cached at ${d.toLocaleString()}.`;
         }
     }
+
+    // Client-side category filter + text search over the digest (no new endpoint).
+    (function () {
+        var list = document.getElementById('paper-list');
+        if (!list) return;
+        var cards = Array.prototype.slice.call(list.querySelectorAll('.paper-card'));
+        var chips = Array.prototype.slice.call(document.querySelectorAll('.cb-chip'));
+        var allChip = document.getElementById('cb-all');
+        var reset = document.getElementById('cb-reset');
+        var search = document.getElementById('research-search');
+        var count = document.getElementById('research-count');
+        var empty = document.getElementById('research-empty');
+        var activeCat = null;
+
+        function setActive(chip) {
+            chips.forEach(function (c) { c.classList.remove('active'); });
+            if (chip) chip.classList.add('active');
+        }
+
+        function apply() {
+            var q = search && search.value ? search.value.trim().toLowerCase() : '';
+            var shown = 0;
+            cards.forEach(function (card) {
+                var ok = true;
+                if (activeCat) {
+                    var primary = card.getAttribute('data-primary');
+                    var cats = (card.getAttribute('data-cats') || '').split(' ');
+                    ok = (primary === activeCat) || cats.indexOf(activeCat) !== -1;
+                }
+                if (ok && q) {
+                    var hay = (card.getAttribute('data-title') + ' ' +
+                               card.getAttribute('data-authors') + ' ' +
+                               card.getAttribute('data-id') + ' ' +
+                               card.getAttribute('data-cats')).toLowerCase();
+                    ok = hay.indexOf(q) !== -1;
+                }
+                card.classList.toggle('hidden', !ok);
+                if (ok) shown++;
+            });
+            if (count) count.textContent = shown + ' / ' + cards.length + ' papers';
+            if (empty) empty.style.display = shown ? 'none' : 'block';
+        }
+
+        chips.forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                var cat = (chip.getAttribute('data-cat') || '').toLowerCase();
+                if (chip === allChip || activeCat === cat) {
+                    activeCat = null; setActive(allChip);
+                } else {
+                    activeCat = cat; setActive(chip);
+                }
+                if (reset) reset.style.display = activeCat ? 'inline' : 'none';
+                apply();
+            });
+        });
+        if (reset) reset.addEventListener('click', function () {
+            activeCat = null; setActive(allChip);
+            reset.style.display = 'none'; apply();
+        });
+        if (search) search.addEventListener('input', apply);
+
+        setActive(allChip);
+        apply();
+    })();
 </script>
 {% endblock %}
