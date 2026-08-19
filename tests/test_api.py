@@ -19,7 +19,7 @@ def test_health_all_green_with_network_mocked(client, network_mocks):
     # Every checked endpoint must pass.
     assert data["failed"] == 0, f"failed endpoints: {[e for e in data['endpoints'] if not e['ok']]}"
     assert data["ok"] is True
-    assert data["passed"] == data["checked"] == 10
+    assert data["passed"] == data["checked"] == 12
 
 
 def test_health_shape(client, network_mocks):

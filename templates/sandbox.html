@@ -34,6 +34,28 @@
 </section>
 
 <section>
+    <h2>Python Workbench</h2>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code>.</p>
+    <div class="compute-wrap">
+        <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
+import collections  # <- this WILL fail; collections is already loaded
+print(sum(range(1, 101)))
+print(collections.Counter('mississippi').most_common())
+print([i**3 for i in range(5)])">print(sum(range(1, 101)))</textarea>
+        <div class="compute-controls">
+            <button id="compute-run">Run</button>
+            <button id="compute-clear">Clear</button>
+            <span id="compute-status"></span>
+        </div>
+    </div>
+    <div class="compute-out" id="compute-out"></div>
+    <details class="compute-history">
+        <summary>Recent runs (<span id="compute-hist-count">0</span>)</summary>
+        <div class="compute-hist" id="compute-hist"><div class="log-entry">No runs yet.</div></div>
+    </details>
+</section>
+
+<section>
     <h2>Log</h2>
     <div class="sandbox-log" id="sandbox-log">
         <div class="log-entry">System initialized. Welcome to the sandbox.</div>
@@ -328,5 +350,102 @@ input.addEventListener('keydown', async e => {
         addLog('Unknown command. Type "help" for commands.');
     }
 });
+
+// --- Python Workbench (server-side, isolated) ---
+const computeCode = document.getElementById('compute-code');
+const computeOut = document.getElementById('compute-out');
+const computeStatus = document.getElementById('compute-status');
+const computeRunBtn = document.getElementById('compute-run');
+const computeClearBtn = document.getElementById('compute-clear');
+const computeHist = document.getElementById('compute-hist');
+const computeHistCount = document.getElementById('compute-hist-count');
+let computeRunning = false;
+
+function fmtBytes(n) {
+    if (n == null) return '?';
+    const u = ['B','KB','MB','GB'];
+    let i = 0, v = n;
+    while (v >= 1024 && i < u.length-1) { v /= 1024; i++; }
+    return v.toFixed(i ? 1 : 0) + ' ' + u[i];
+}
+
+function renderComputeResult(r) {
+    let html = '';
+    const out = (r.out || '').trim();
+    if (out) html += '<pre class="compute-out-block">' + escapeHtml(out) + '</pre>';
+    if (r.timed_out) {
+        html += '<div class="compute-msg err">⏱ ' + escapeHtml(r.error || 'timed out') + '</div>';
+    } else if (r.ok) {
+        if (r.note) html += '<div class="compute-msg note">' + escapeHtml(r.note) + '</div>';
+    } else {
+        html += '<div class="compute-msg err">✖ ' + escapeHtml(r.exception || r.error || 'error') + '</div>';
+        if (r.error && r.exception && r.error !== r.exception) {
+            html += '<details class="compute-tb"><summary>full traceback</summary><pre>' + escapeHtml(r.error) + '</pre></details>';
+        }
+    }
+    computeOut.innerHTML = html || '<div class="compute-msg">(no output)</div>';
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+async function runCompute() {
+    if (computeRunning) return;
+    const code = computeCode.value;
+    if (!code.trim()) { renderComputeResult({ok:false, error:'No code supplied.'}); return; }
+    computeRunning = true;
+    computeRunBtn.disabled = true;
+    const t0 = performance.now();
+    computeStatus.textContent = 'running…';
+    computeOut.innerHTML = '<div class="compute-msg">running…</div>';
+    try {
+        const res = await fetch('/api/compute', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({code: code})
+        });
+        const r = await res.json();
+        const ms = Math.round(performance.now() - t0);
+        renderComputeResult(r);
+        computeStatus.textContent = (r.ok ? '✓ done' : (r.timed_out ? '⏱ killed' : '✖ error')) + ' · ' + ms + ' ms';
+        addLog('Workbench: ' + (r.ok ? 'done' : (r.timed_out ? 'killed (limit)' : 'error')) + ' in ' + ms + ' ms', r.ok ? '' : 'warn');
+    } catch (e) {
+        computeStatus.textContent = 'network error';
+        computeOut.innerHTML = '<div class="compute-msg err">Could not reach the workbench: ' + escapeHtml(String(e)) + '</div>';
+    } finally {
+        computeRunning = false;
+        computeRunBtn.disabled = false;
+    }
+}
+
+computeRunBtn.addEventListener('click', runCompute);
+computeClearBtn.addEventListener('click', () => {
+    computeCode.value = '';
+    computeOut.innerHTML = '';
+    computeStatus.textContent = '';
+});
+computeCode.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runCompute(); }
+});
+
+async function refreshComputeHistory() {
+    try {
+        const res = await fetch('/api/compute/history');
+        const d = await res.json();
+        const entries = d.entries || [];
+        computeHistCount.textContent = String(entries.length);
+        if (!entries.length) { computeHist.innerHTML = '<div class="log-entry">No runs yet.</div>'; return; }
+        computeHist.innerHTML = entries.slice(0, 12).map(e => {
+            const ts = (e.ts || '').replace('T', ' ').slice(0, 19);
+            const status = e.ok ? '✓' : (e.timed_out ? '⏱' : '✖');
+            const snippet = (e.code || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            return '<div class="log-entry"><span class="ch-status ' + (e.ok ? 'ok' : 'err') + '">' + status + '</span> ' +
+                   escapeHtml(snippet || '(empty)') +
+                   '<span class="ch-meta">' + (e.chars || 0) + ' ch · ' + escapeHtml(ts) + '</span></div>';
+        }).join('');
+    } catch { /* history is best-effort; ignore */ }
+}
+refreshComputeHistory();
 </script>
 {% endblock %}

@@ -1,0 +1,184 @@
+"""Tests for the server-side Python workbench (compute.py + /api/compute).
+
+These are the heart of the feature: they prove the *safety* contract, not just
+that "it returned 200". A snippet must be able to (a) do real computation, and
+(b) be stopped before it can hang the web worker, eat memory, write files, or
+import escalation paths (os/socket/subprocess). The hard backstop is OS rlimits
+enforced in the child; these tests verify each of those actually fires.
+
+Kept hermetic: no network. The one genuinely slow case (runaway loop) is bounded
+by a short parent-side wall timeout so the suite stays fast.
+"""
+import os
+
+import pytest
+
+import compute
+from compute import run_compute
+
+
+# ---- pure run_compute(): the actual execution contract -----------------------
+
+def test_compute_runs_and_captures_output():
+    r = run_compute("print(sum(range(1, 101)))")
+    assert r["ok"] is True
+    assert r["timed_out"] is False
+    assert "5050" in r["out"]
+
+
+def test_compute_uses_preloaded_modules_without_import():
+    r = run_compute(
+        "import collections\n"   # must FAIL (no import) -- we use the preloaded global
+        "print('unreachable')"
+    )
+    # `import collections` is not allowed: __import__ is absent from builtins.
+    assert r["ok"] is False
+    assert "unreachable" not in r["out"]
+
+    # The same capability via the pre-loaded global works with no import at all.
+    r2 = run_compute("print(collections.Counter('mississippi').most_common(1)[0][1])")
+    assert r2["ok"] is True
+    assert "4" in r2["out"]
+
+
+@pytest.mark.parametrize("snippet,needle", [
+    ("open('/tmp/nope')", "open"),
+    ("import os", "os"),
+    ("eval('1+1')", "eval"),
+    ("exec('print(1)')", "exec"),
+    ("__import__('os')", "import"),
+    ("import subprocess", "subprocess"),
+    ("import socket", "socket"),
+])
+def test_compute_blocks_escalation_paths(snippet, needle):
+    r = run_compute(snippet)
+    assert r["ok"] is False, f"should be blocked: {snippet!r}"
+    # The failure is a NameError (nothing in scope) or a clear error, never a
+    # successful run.
+    assert r["timed_out"] is False
+
+
+def test_compute_empty_code():
+    r = run_compute("")
+    assert r["ok"] is False
+    assert "No code" in r["error"]
+    r_ws = run_compute("   \n  ")
+    assert r_ws["ok"] is False
+    assert "No code" in r_ws["error"]
+
+
+def test_compute_user_error_is_reported_not_raised():
+    r = run_compute("print(undefined_name)")
+    assert r["ok"] is False
+    assert r["timed_out"] is False
+    assert "NameError" in (r["exception"] or "")
+    assert r["rc"] == 0  # the harness handled it; the *process* exited cleanly
+
+
+def test_compute_runaway_loop_is_killed():
+    """A forever loop must be killed by the parent's wall timeout (bounded here
+    to keep the test fast) and reported as timed_out, not hang the caller."""
+    r = run_compute("x = 0\nwhile True:\n    x += 1", wall_timeout=2)
+    assert r["ok"] is False
+    assert r["timed_out"] is True
+    assert "wall-clock" in (r["error"] or "")
+
+
+def test_compute_memory_bomb_is_contained(tmp_path):
+    """A memory bomb must be contained (MemoryError or kill) and must not hang
+    or exhaust the host. The 800 MB RLIMIT_AS trips first as a MemoryError."""
+    r = run_compute(
+        "junk = [b'x' * (1024 * 1024) for _ in range(1000)]\n"
+        "print('made it')"
+    )
+    # It must NOT successfully print; it must be stopped by the memory limit.
+    assert "made it" not in r["out"]
+    assert r["ok"] is False
+
+
+def test_compute_does_not_write_files(tmp_path):
+    """open() is not in scope, so a snippet cannot create files. We also verify
+    nothing lands in the CWD."""
+    r = run_compute("open('should_not_exist_xyz.txt', 'w').write('hi')")
+    assert r["ok"] is False
+    assert not os.path.exists("should_not_exist_xyz.txt")
+
+
+# ---- history: isolated to a temp file so tests don't touch the real log ------
+
+@pytest.fixture
+def isolated_history(tmp_path, monkeypatch):
+    path = tmp_path / "compute_history.jsonl"
+    monkeypatch.setattr(compute, "COMPUTE_HISTORY_PATH", str(path))
+    return path
+
+
+def test_compute_history_roundtrip(isolated_history):
+    from compute import record_compute, get_compute_history
+    r = run_compute("print(1 + 1)")
+    record_compute("print(1 + 1)", r)
+    r2 = run_compute("while True: pass", wall_timeout=1)
+    record_compute("while True: pass", r2)
+    entries = get_compute_history()
+    assert len(entries) == 2
+    # newest first: the timed-out run (recorded last) is at the top
+    assert entries[0]["ok"] is False
+    assert entries[0]["timed_out"] is True
+    assert entries[1]["ok"] is True
+    for e in entries:
+        assert "ts" in e and "code" in e and "ok" in e
+
+
+def test_compute_history_empty_when_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(compute, "COMPUTE_HISTORY_PATH", str(tmp_path / "none.jsonl"))
+    from compute import get_compute_history
+    assert get_compute_history() == []
+
+
+# ---- API surface -------------------------------------------------------------
+
+def test_api_compute_runs(client):
+    resp = client.post("/api/compute", json={"code": "print(6 * 7)"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert "42" in data["out"]
+
+
+def test_api_compute_error_is_still_200(client):
+    # A snippet error is a valid outcome, not a server failure.
+    resp = client.post("/api/compute", json={"code": "x = 1/0"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "ZeroDivisionError" in (data["exception"] or "")
+
+
+def test_api_compute_too_long_is_413(client):
+    resp = client.post("/api/compute", json={"code": "x" * 60000})
+    assert resp.status_code == 413
+    assert resp.get_json()["note"] == "too_long"
+
+
+def test_api_compute_capabilities(client):
+    data = client.get("/api/compute/capabilities").get_json()
+    for key in ("wall_timeout_seconds", "cpu_time_limit_seconds",
+                "memory_limit_bytes", "max_concurrent", "safe_modules"):
+        assert key in data
+    assert data["wall_timeout_seconds"] < 30  # must stay under gunicorn's 30s worker timeout
+    assert "math" in data["safe_modules"] and "os" not in data["safe_modules"]
+
+
+def test_api_compute_history_shape(client):
+    data = client.get("/api/compute/history").get_json()
+    assert "entries" in data
+    assert isinstance(data["entries"], list)
+
+
+def test_sandbox_page_has_workbench(client):
+    html = client.get("/sandbox").get_data(as_text=True)
+    assert 'id="compute-code"' in html
+    assert 'id="compute-run"' in html
+    assert 'id="compute-out"' in html
+    assert "Python Workbench" in html
+    assert "/api/compute" in html

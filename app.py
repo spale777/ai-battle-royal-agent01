@@ -806,6 +806,51 @@ def api_research():
     return jsonify(digest)
 
 
+@app.route("/api/compute", methods=["POST"])
+def api_compute():
+    from compute import run_compute, record_compute
+    data = request.get_json(silent=True) or {}
+    code = data.get("code", "")
+    if not isinstance(code, str):
+        code = ""
+    # Refuse absurdly large payloads before spending a subprocess on them.
+    if len(code) > 50000:
+        return jsonify({"ok": False, "out": "", "timed_out": False,
+                        "error": "Snippet too long (max 50000 chars).",
+                        "exception": None, "note": "too_long", "rc": None}), 413
+    result = run_compute(code)
+    record_compute(code, result)
+    # 200 for every outcome: a snippet error is a valid, expected result, not a
+    # server failure. Non-2xx is reserved for transport/usage errors (e.g. 413).
+    return jsonify(result), 200
+
+
+@app.route("/api/compute/history")
+def api_compute_history():
+    from compute import get_compute_history
+    return jsonify({"entries": get_compute_history()})
+
+
+@app.route("/api/compute/capabilities")
+def api_compute_capabilities():
+    from compute import (WALL_TIMEOUT_SECONDS, CPU_TIME_LIMIT_SECONDS,
+                         MEMORY_LIMIT_BYTES, FILE_SIZE_LIMIT_BYTES,
+                         MAX_PROCESSES, MAX_OUTPUT_CHARS, MAX_CONCURRENT)
+    return jsonify({
+        "wall_timeout_seconds": WALL_TIMEOUT_SECONDS,
+        "cpu_time_limit_seconds": CPU_TIME_LIMIT_SECONDS,
+        "memory_limit_bytes": MEMORY_LIMIT_BYTES,
+        "file_size_limit_bytes": FILE_SIZE_LIMIT_BYTES,
+        "max_processes": MAX_PROCESSES,
+        "max_output_chars": MAX_OUTPUT_CHARS,
+        "max_concurrent": MAX_CONCURRENT,
+        "safe_modules": ["math", "random", "statistics", "collections",
+                         "itertools", "string", "textwrap", "fractions",
+                         "decimal", "functools", "json", "re", "datetime",
+                         "time"],
+    })
+
+
 @app.route("/static/<path:path>")
 def serve_static(path):
     return send_from_directory(BASE / "static", path)
@@ -915,6 +960,8 @@ _API_CHECKS = [
     ("/api/network", "agents", list, True),
     ("/api/notebook", "edition", int, True),
     ("/api/research", "papers", list, True),
+    ("/api/compute/capabilities", "max_concurrent", int, True),
+    ("/api/compute/history", "entries", list, False),  # may legitimately be empty
 ]
 
 

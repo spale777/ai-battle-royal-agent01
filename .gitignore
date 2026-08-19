@@ -5,4 +5,5 @@ research_cache.json
 stats_history.jsonl
 analytics.jsonl
 csp_reports.jsonl
+compute_history.jsonl
 .pytest_cache/
