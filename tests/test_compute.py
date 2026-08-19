@@ -163,10 +163,87 @@ def test_api_compute_too_long_is_413(client):
 def test_api_compute_capabilities(client):
     data = client.get("/api/compute/capabilities").get_json()
     for key in ("wall_timeout_seconds", "cpu_time_limit_seconds",
-                "memory_limit_bytes", "max_concurrent", "safe_modules"):
-        assert key in data
+                "memory_limit_bytes", "max_concurrent", "safe_modules",
+                "plotting", "max_images", "figure_dpi"):
+        assert key in data, f"missing key: {key}"
     assert data["wall_timeout_seconds"] < 30  # must stay under gunicorn's 30s worker timeout
     assert "math" in data["safe_modules"] and "os" not in data["safe_modules"]
+    assert data["plotting"]["enabled"] is True
+    assert data["plotting"]["namespace"] == "plt"
+    assert "plot" in data["plotting"]["methods"]
+    assert "savefig" not in data["plotting"]["methods"]
+
+
+# ---- plotting (restricted plt) -----------------------------------------------
+
+def test_compute_plt_present_and_plotting():
+    """plt must be a usable namespace that can produce an image."""
+    r = run_compute("print(hasattr(plt, 'plot'))")
+    assert r["ok"] is True
+    assert "True" in r["out"]
+
+def test_compute_plot_produces_image():
+    """A snippet that calls plt.plot + plt.show() must return at least one image."""
+    r = run_compute("plt.plot([0, 1, 2], [1, 4, 2])\nplt.show()")
+    assert r["ok"] is True
+    assert len(r.get("images", [])) >= 1
+    im = r["images"][0]
+    assert im["format"] == "png"
+    assert im["data_url"].startswith("data:image/png;base64,")
+    assert im["bytes"] > 100  # a real PNG, not an empty buffer
+
+def test_compute_plot_multiple_figures_capped():
+    """Multiple figures in one run are capped at MAX_IMAGES."""
+    r = run_compute(
+        "plt.bar([1,2,3],[4,2,5]); plt.show()\n"
+        "plt.hist([1,2,2,3,3], bins=3); plt.show()\n"
+        "plt.pie([3,1,1]); plt.show()\n"
+        "plt.plot([0,1],[1,0]); plt.show()"
+    )
+    assert r["ok"] is True
+    import compute as _c
+    assert len(r.get("images", [])) <= _c.MAX_IMAGES
+
+def test_compute_plot_no_show_no_images():
+    """plt.plot without plt.show() must NOT return images (no figure is
+    rendered unless the user explicitly asks)."""
+    r = run_compute("plt.plot([0,1],[1,0])")
+    assert r["ok"] is True
+    assert r.get("images", []) == []
+
+def test_compute_plt_savefig_blocked():
+    """plt.savefig must raise PermissionError (no file writing)."""
+    r = run_compute("plt.savefig('/tmp/should_not_exist.png')")
+    assert r["ok"] is False
+    assert "PermissionError" in (r["exception"] or "")
+    assert not os.path.exists("/tmp/should_not_exist.png")
+
+def test_compute_plt_does_not_expose_escalation():
+    """plt in scope must NOT open new escalation paths."""
+    for snip in ["import os", "open('/tmp/x')", "eval('1+1')"]:
+        r = run_compute(snip)
+        assert r["ok"] is False, f"should be blocked even with plt: {snip!r}"
+
+def test_compute_plot_plain_lists_only():
+    """plt must accept plain Python lists (no numpy needed)."""
+    r = run_compute("plt.plot(list(range(10)), [i**2 for i in range(10)]); plt.show()")
+    assert r["ok"] is True
+    assert len(r.get("images", [])) == 1
+
+def test_compute_plot_error_is_reported():
+    """A plotting error (e.g., mismatched lengths) must be a user error, not a crash."""
+    r = run_compute("plt.plot([1,2,3], [1,2])\nplt.show()")
+    assert r["ok"] is False  # ValueError from matplotlib
+    assert "ValueError" in (r["exception"] or "")
+
+def test_api_compute_plot_returns_images(client):
+    """The API must return images in the JSON response."""
+    resp = client.post("/api/compute", json={"code": "plt.plot([0,1],[1,0]); plt.show()"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert len(data.get("images", [])) == 1
+    assert data["images"][0]["data_url"].startswith("data:image/png;base64,")
 
 
 def test_api_compute_history_shape(client):

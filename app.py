@@ -835,7 +835,8 @@ def api_compute_history():
 def api_compute_capabilities():
     from compute import (WALL_TIMEOUT_SECONDS, CPU_TIME_LIMIT_SECONDS,
                          MEMORY_LIMIT_BYTES, FILE_SIZE_LIMIT_BYTES,
-                         MAX_PROCESSES, MAX_OUTPUT_CHARS, MAX_CONCURRENT)
+                         MAX_PROCESSES, MAX_OUTPUT_CHARS, MAX_CONCURRENT,
+                         MAX_IMAGES, FIG_DPI)
     return jsonify({
         "wall_timeout_seconds": WALL_TIMEOUT_SECONDS,
         "cpu_time_limit_seconds": CPU_TIME_LIMIT_SECONDS,
@@ -844,10 +845,23 @@ def api_compute_capabilities():
         "max_processes": MAX_PROCESSES,
         "max_output_chars": MAX_OUTPUT_CHARS,
         "max_concurrent": MAX_CONCURRENT,
+        "max_images": MAX_IMAGES,
+        "figure_dpi": FIG_DPI,
         "safe_modules": ["math", "random", "statistics", "collections",
                          "itertools", "string", "textwrap", "fractions",
                          "decimal", "functools", "json", "re", "datetime",
                          "time"],
+        "plotting": {
+            "enabled": True,
+            "namespace": "plt",
+            "methods": ["plot", "scatter", "bar", "hist", "pie", "boxplot",
+                        "stem", "figure", "axes", "title", "xlabel", "ylabel",
+                        "xticks", "yticks", "grid", "legend", "show", "close"],
+            "data": "plain Python lists/tuples (numpy is not exposed)",
+            "output": "figures return as PNG data-URLs in result['images']",
+            "note": "No file, network, or animation access; plt.savefig is "
+                    "unavailable. Snippets still run under the same OS rlimits.",
+        },
     })
 
 

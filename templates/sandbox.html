@@ -35,13 +35,14 @@
 
 <section>
     <h2>Python Workbench</h2>
-    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code>.</p>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images.</p>
+    <div class="compute-examples" id="compute-examples"></div>
     <div class="compute-wrap">
         <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
-import collections  # <- this WILL fail; collections is already loaded
 print(sum(range(1, 101)))
 print(collections.Counter('mississippi').most_common())
-print([i**3 for i in range(5)])">print(sum(range(1, 101)))</textarea>
+xs = list(range(50)); ys = [math.sin(x) for x in xs]
+plt.plot(xs, ys); plt.show()  # returns an image">print(sum(range(1, 101)))</textarea>
         <div class="compute-controls">
             <button id="compute-run">Run</button>
             <button id="compute-clear">Clear</button>
@@ -53,6 +54,17 @@ print([i**3 for i in range(5)])">print(sum(range(1, 101)))</textarea>
         <summary>Recent runs (<span id="compute-hist-count">0</span>)</summary>
         <div class="compute-hist" id="compute-hist"><div class="log-entry">No runs yet.</div></div>
     </details>
+    <div class="compute-cap-note">
+        <strong>What&rsquo;s allowed / blocked.</strong> Plain Python lists as data &mdash;
+        no <code>numpy</code>, no file or network access of any kind, no
+        <code>import</code>/<code>open</code>/<code>eval</code>/<code>exec</code>/<code>__import__</code>, no
+        <code>os</code>/<code>socket</code>/<code>subprocess</code>. The hard backstop is OS
+        resource limits (CPU time, memory, no writes, fork cap) enforced by the kernel in a
+        separate process &mdash; a runaway or memory bomb is killed, it never touches this web
+        server. This is an exploration sandbox, not a security boundary.
+        <code>plt.savefig</code> is unavailable; figures come back as images via
+        <code>plt.show()</code>.
+    </div>
 </section>
 
 <section>
@@ -373,6 +385,12 @@ function renderComputeResult(r) {
     let html = '';
     const out = (r.out || '').trim();
     if (out) html += '<pre class="compute-out-block">' + escapeHtml(out) + '</pre>';
+    if (r.images && r.images.length) {
+        html += '<div class="compute-images">' +
+            r.images.map(function (im, i) {
+                return '<img class="compute-image" src="' + im.data_url + '" alt="figure ' + (i+1) + '" title="Click to zoom">';
+            }).join('') + '</div>';
+    }
     if (r.timed_out) {
         html += '<div class="compute-msg err">⏱ ' + escapeHtml(r.error || 'timed out') + '</div>';
     } else if (r.ok) {
@@ -384,6 +402,12 @@ function renderComputeResult(r) {
         }
     }
     computeOut.innerHTML = html || '<div class="compute-msg">(no output)</div>';
+    // click a figure to zoom / reset
+    computeOut.querySelectorAll('.compute-image').forEach(function (img) {
+        img.addEventListener('click', function () {
+            img.classList.toggle('zoomed');
+        });
+    });
 }
 
 function escapeHtml(s) {
@@ -447,5 +471,111 @@ async function refreshComputeHistory() {
     } catch { /* history is best-effort; ignore */ }
 }
 refreshComputeHistory();
+
+// --- Workbench example snippets (chips) --------------------------------------
+// Small, self-contained snippets that each do real computation and most of them
+// also plot the result, so first-use is instant and the plotting capability is
+// discoverable without reading the docs.
+const COMPUTE_EXAMPLES = [
+    {
+        label: 'Sine wave',
+        code: 'xs = [round(i * 0.2, 2) for i in range(51)]\n' +
+              'ys = [round(math.sin(x) * 10, 2) for x in xs]\n' +
+              "plt.plot(xs, ys)\n" +
+              "plt.title('Sine wave')\n" +
+              "plt.xlabel('x'); plt.ylabel('sin(x) * 10'); plt.grid(True)\n" +
+              'plt.show()\n' +
+              "print('plotted', len(xs), 'points')"
+    },
+    {
+        label: 'Histogram (normal)',
+        code: 'vals = []\n' +
+              'for _ in range(2000):\n' +
+              '    vals.append((random.gauss(0, 1) + random.gauss(0, 1)) / 2)\n' +
+              'plt.hist(vals, bins=40)\n' +
+              "plt.title('Sum of two standard normals (mean=0, std=1)')\n" +
+              "plt.xlabel('value'); plt.ylabel('count'); plt.grid(True, alpha=0.3)\n" +
+              'plt.show()\n' +
+              'print("n =", len(vals), "mean =", round(statistics.mean(vals), 3))'
+    },
+    {
+        label: 'Bar chart (primes)',
+        code: 'def is_prime(n):\n' +
+              '    if n < 2: return False\n' +
+              '    for d in range(2, int(n ** 0.5) + 1):\n' +
+              '        if n % d == 0: return False\n' +
+              '    return True\n' +
+              'primes = [n for n in range(1, 101) if is_prime(n)]\n' +
+              'decs = [sum(1 for p in primes if p % 10 == d) for d in range(10)]\n' +
+              'plt.bar(range(10), decs)\n' +
+              "plt.title('Primes under 100, by units digit')\n" +
+              "plt.xlabel('units digit'); plt.ylabel('count'); plt.grid(True, axis='y', alpha=0.3)\n" +
+              'plt.show()\n' +
+              "print(len(primes), 'primes; counts by digit:', decs)"
+    },
+    {
+        label: 'Scatter (clustered)',
+        code: 'pts = []\n' +
+              'for _ in range(300):\n' +
+              '    cx = random.choice([-3, 0, 3]); cy = random.choice([-2, 2])\n' +
+              '    pts.append((cx + random.gauss(0, 0.6), cy + random.gauss(0, 0.6)))\n' +
+              'xs = [p[0] for p in pts]; ys = [p[1] for p in pts]\n' +
+              'plt.scatter(xs, ys, alpha=0.6, s=14)\n' +
+              "plt.title('Gaussian clusters'); plt.xlabel('x'); plt.ylabel('y'); plt.grid(True, alpha=0.3)\n" +
+              'plt.show()\n' +
+              'print("plotted", len(pts), "points across 4 clusters")'
+    },
+    {
+        label: 'Pie (coin flips)',
+        code: 'heads = sum(1 for _ in range(1000) if random.random() < 0.5)\n' +
+              'tails = 1000 - heads\n' +
+              'plt.pie([heads, tails], labels=[\"Heads\", \"Tails\"], autopct=\"%1.1f%%\")\n' +
+              "plt.title('1000 coin flips')\n" +
+              'plt.show()\n' +
+              "print('heads =', heads, 'tails =', tails)"
+    },
+    {
+        label: 'Boxplot (groups)',
+        code: 'groups = [random.gauss(50, 10) for _ in range(30)]\n' +
+              'for _ in range(30): groups.append(random.gauss(60, 10))\n' +
+              'for _ in range(30): groups.append(random.gauss(55, 15))\n' +
+              'plt.boxplot([groups[0:30], groups[30:60], groups[60:90]])\n' +
+              "plt.title('Three samples'); plt.ylabel('value'); plt.grid(True, axis='y', alpha=0.3)\n" +
+              'plt.show()\n' +
+              "print('group means:', [round(statistics.mean(g), 1) for g in [groups[0:30], groups[30:60], groups[60:90]]])"
+    },
+    {
+        label: 'Fibonacci spiral',
+        code: 'a, b = 0, 1\n' +
+              'xs = [0]; ys = [0]\n' +
+              'for _ in range(30):\n' +
+              '    a, b = b, a + b\n' +
+              '    ang = math.radians(90 * (len(xs) % 4))\n' +
+              '    xs.append(xs[-1] + b * math.cos(ang))\n' +
+              '    ys.append(ys[-1] + b * math.sin(ang))\n' +
+              'plt.plot(xs, ys, marker="o")\n' +
+              "plt.title('Fibonacci spiral (first 30)'); plt.grid(True, alpha=0.3)\n" +
+              'plt.show()\n' +
+              "print('last Fibonacci value:', b)"
+    }
+];
+
+const computeExamples = document.getElementById('compute-examples');
+if (computeExamples) {
+    computeExamples.innerHTML = COMPUTE_EXAMPLES.map(function (ex, i) {
+        return '<button class="compute-chip" data-ex="' + i + '" title="' +
+               escapeHtml(ex.code.slice(0, 120).replace(/\n/g, ' ')) + '">' +
+               escapeHtml(ex.label) + '</button>';
+    }).join('');
+    computeExamples.querySelectorAll('.compute-chip').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const ex = COMPUTE_EXAMPLES[parseInt(btn.dataset.ex, 10)];
+            if (ex) {
+                computeCode.value = ex.code;
+                addLog('Workbench: loaded example "' + ex.label + '"');
+            }
+        });
+    });
+}
 </script>
 {% endblock %}
