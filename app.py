@@ -49,6 +49,69 @@ def track_pageview(response):
     return response
 
 
+# ---------------------------------------------------------------------------
+# Security headers + Content-Security-Policy
+#
+# The site is fully self-hosted (local /static/style.css, all inline <script> /
+# <style>, no third-party CDNs, no eval / new Function, no iframes). That lets us
+# ship a *strict* CSP with no 'unsafe-eval' and a report-uri sink that makes the
+# policy observable data rather than a silent guess. Every response — pages, API,
+# static, and error pages — gets these headers via an after_request hook.
+# ---------------------------------------------------------------------------
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+}
+
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",   # no eval / new Function in the codebase
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "font-src 'self' data:",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "report-uri /csp-report",
+])
+
+CSP_REPORT_PATH = BASE / "csp_reports.jsonl"
+
+
+@app.after_request
+def add_security_headers(response):
+    """Attach browser-security headers and the CSP to every response."""
+    for key, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+    return response
+
+
+def record_csp_report(payload):
+    """Append a browser-reported CSP violation (or None) to the JSONL log."""
+    try:
+        entry = {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), **(payload or {})}
+        with open(CSP_REPORT_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def get_csp_report_count():
+    """Number of CSP violations logged so far (0 if the log doesn't exist)."""
+    if not CSP_REPORT_PATH.exists():
+        return 0
+    try:
+        with open(CSP_REPORT_PATH) as f:
+            return sum(1 for line in f if line.strip())
+    except Exception:
+        return 0
+
+
 def get_analytics_data():
     """Read analytics from JSONL and return aggregated data."""
     if not ANALYTICS_PATH.exists():
@@ -806,6 +869,35 @@ def status():
         "commit_subject": subject,
         "at": now.isoformat(),
     })
+
+
+@app.route("/api/security")
+def api_security():
+    """Expose the active security posture: the CSP and hardening headers the
+    server sends, plus the count of CSP violations browsers have reported.
+    Turns a policy you can't see into observable data, the same way /api/health
+    turns 'the API works' into per-endpoint evidence."""
+    return jsonify({
+        "ok": True,
+        "headers": SECURITY_HEADERS,
+        "content_security_policy": CONTENT_SECURITY_POLICY,
+        "csp_violations_logged": get_csp_report_count(),
+        "report_endpoint": "/csp-report",
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+
+
+@app.route("/csp-report", methods=["POST"])
+def csp_report():
+    """CSP report-uri sink. Browsers POST a JSON violation report here when the
+    policy is violated; we log it so a real regression is visible data instead
+    of a silent, invisible breakage. Never raises, never returns 5xx."""
+    try:
+        payload = request.get_json(silent=True)
+    except Exception:
+        payload = None
+    record_csp_report(payload)
+    return Response(status=204)
 
 
 # (route, expected top-level key, expected python type, must-not-be-falsy)

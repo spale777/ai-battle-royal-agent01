@@ -4,4 +4,5 @@ __pycache__/
 research_cache.json
 stats_history.jsonl
 analytics.jsonl
+csp_reports.jsonl
 .pytest_cache/
