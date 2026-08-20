@@ -35,7 +35,7 @@
 
 <section>
     <h2>Python Workbench</h2>
-    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images.</p>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it.</p>
     <div class="compute-examples" id="compute-examples"></div>
     <div class="compute-wrap">
         <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
@@ -46,9 +46,16 @@ plt.plot(xs, ys); plt.show()  # returns an image">print(sum(range(1, 101)))</tex
         <div class="compute-controls">
             <button id="compute-run">Run</button>
             <button id="compute-clear">Clear</button>
+            <button id="compute-share" class="btn-ghost" title="Encode this snippet in the URL so the link reproduces it">Copy share link</button>
             <span id="compute-status"></span>
         </div>
+        <div class="compute-share-line" id="compute-share-line" hidden>
+            <input type="text" id="compute-share-url" readonly class="compute-share-input" aria-label="Shareable workbench link">
+            <button id="compute-share-copy" class="btn-ghost" type="button">Copy</button>
+            <span class="compute-share-note" id="compute-share-note"></span>
+        </div>
     </div>
+    <div class="compute-restore-notice" id="compute-restore-notice" hidden></div>
     <div class="compute-out" id="compute-out"></div>
     <details class="compute-history">
         <summary>Recent runs (<span id="compute-hist-count">0</span>)</summary>
@@ -433,6 +440,7 @@ async function runCompute() {
         const ms = Math.round(performance.now() - t0);
         renderComputeResult(r);
         computeStatus.textContent = (r.ok ? '✓ done' : (r.timed_out ? '⏱ killed' : '✖ error')) + ' · ' + ms + ' ms';
+        if (r.ok) syncComputeUrl(code);
         addLog('Workbench: ' + (r.ok ? 'done' : (r.timed_out ? 'killed (limit)' : 'error')) + ' in ' + ms + ' ms', r.ok ? '' : 'warn');
     } catch (e) {
         computeStatus.textContent = 'network error';
@@ -453,6 +461,119 @@ computeCode.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runCompute(); }
 });
 
+// --- Shareable workbench links (snippet in the URL fragment, #c=<token>) ------
+// A session is a link that reproduces itself: the snippet is base64url-encoded
+// into the URL fragment (the browser never sends a fragment to the server), so
+// opening the link restores the snippet and re-running it gives the same result.
+// Encoding/decoding both live server-side (compute.encode_share/decode_share), so
+// there is exactly one implementation and the strict CSP needs nothing new.
+const computeShareBtn = document.getElementById('compute-share');
+const computeShareLine = document.getElementById('compute-share-line');
+const computeShareUrl = document.getElementById('compute-share-url');
+const computeShareCopy = document.getElementById('compute-share-copy');
+const computeShareNote = document.getElementById('compute-share-note');
+const computeRestoreNotice = document.getElementById('compute-restore-notice');
+
+function fragmentToken() {
+    const h = location.hash || '';
+    const m = h.match(/^#c=([\w-]+)/);
+    return m ? m[1] : null;
+}
+
+// After a successful run, make the address bar a live permalink of the current
+// snippet, so "copy the address bar" always yields a working share link.
+// Client-side base64url, matching the server's compute.encode_share.
+function b64urlEncode(s) {
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function syncComputeUrl(code) {
+    const clean = (code || '').trim();
+    if (!clean) return;
+    if (clean.length > 4000) return;   // over the share cap; don't write a link that can't be shared
+    const token = b64urlEncode(clean);
+    const next = '#c=' + token;
+    if (location.hash !== next) {
+        history.replaceState(null, '', next);
+    }
+}
+
+function showShareNote(text, isErr) {
+    computeShareNote.textContent = text;
+    computeShareNote.classList.toggle('err', !!isErr);
+    if (text) {
+        clearTimeout(showShareNote._t);
+        showShareNote._t = setTimeout(() => { computeShareNote.textContent = ''; }, 4000);
+    }
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+    // Non-secure-context fallback (http): select the readonly input and copy.
+    return new Promise(function (resolve) {
+        computeShareUrl.value = text;
+        computeShareUrl.select();
+        computeShareUrl.setSelectionRange(0, text.length);
+        try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+        resolve();
+    });
+}
+
+async function buildShareLink() {
+    if (computeShareLine) computeShareLine.hidden = false;
+    const code = computeCode.value;
+    if (!code.trim()) { showShareNote('Nothing to share yet — write or load a snippet first.', true); return; }
+    showShareNote('');
+    try {
+        const res = await fetch('/api/compute/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code })
+        });
+        const r = await res.json();
+        if (!r.ok) { showShareNote(r.note || 'Could not build a share link.', true); return; }
+        computeShareUrl.value = r.link;
+        await copyToClipboard(r.link);
+        showShareNote('Link copied — opening it restores this snippet (and re-runs it).', false);
+        addLog('Workbench: share link built (' + r.chars + ' chars)');
+    } catch (e) {
+        showShareNote('Could not reach the share endpoint: ' + String(e), true);
+    }
+}
+
+computeShareBtn.addEventListener('click', buildShareLink);
+computeShareCopy.addEventListener('click', function () {
+    if (!computeShareUrl.value) { buildShareLink(); return; }
+    copyToClipboard(computeShareUrl.value).then(function () { showShareNote('Copied.', false); });
+});
+
+// Restore a snippet from a shared link on load (the fragment holds #c=<token>).
+// We ask the server to decode it (single source of truth) rather than re-implement
+// base64 in the page, then run it so the link reproduces the result, not just the code.
+function restoreFromFragment() {
+    const token = fragmentToken();
+    if (!token) return Promise.resolve(false);
+    return fetch('/api/compute/share?c=' + encodeURIComponent(token), { headers: { 'Accept': 'application/json' } })
+        .then(function (res) { return res.json(); })
+        .then(function (r) {
+            if (!r.ok || !r.code) {
+                computeRestoreNotice.hidden = false;
+                computeRestoreNotice.textContent = 'This link carried a snippet, but it could not be decoded.';
+                return false;
+            }
+            computeCode.value = r.code;
+            computeRestoreNotice.hidden = false;
+            computeRestoreNotice.textContent = 'Restored a snippet from this link (' + r.chars + ' chars) and ran it.';
+            return true;
+        })
+        .catch(function () { return false; });
+}
+
 async function refreshComputeHistory() {
     try {
         const res = await fetch('/api/compute/history');
@@ -471,6 +592,12 @@ async function refreshComputeHistory() {
     } catch { /* history is best-effort; ignore */ }
 }
 refreshComputeHistory();
+
+// If this page was opened from a shared workbench link (#c=<token>), restore the
+// snippet and run it so the link reproduces the result, not just the code.
+restoreFromFragment().then(function (restored) {
+    if (restored) runCompute();
+});
 
 // --- Workbench example snippets (chips) --------------------------------------
 // Small, self-contained snippets that each do real computation and most of them

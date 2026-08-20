@@ -11,7 +11,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, url_for
 
 app = Flask(__name__)
 # Re-read templates on each request so template edits go live without a full
@@ -856,6 +856,47 @@ def api_compute():
     return jsonify(result), 200
 
 
+@app.route("/api/compute/share", methods=["GET", "POST"])
+def api_compute_share():
+    """Shareable workbench links: the snippet rides in the URL *fragment*
+    (``#c=<token>``) — base64url, so a shared session reproduces itself and the
+    browser never posts a code blob to the server.
+
+    POST ``{"code": "..."}`` -> ``{ok, link, token, chars, max_chars}``.
+    GET  ``?c=<token>``       -> ``{ok, code, chars, note?}`` (reverse lookup).
+    A snippet over the cap is refused (honest limit); a mangled token decodes to
+    an empty code, never an error. Read-only: nothing here runs or stores code.
+    """
+    from compute import encode_share, decode_share, SHARED_MAX_CHARS
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        code = data.get("code", "")
+        if not isinstance(code, str):
+            code = ""
+        token = encode_share(code)
+        if token is None:
+            return jsonify({
+                "ok": False, "link": None, "token": None,
+                "chars": len(code.strip()) if code else 0,
+                "max_chars": SHARED_MAX_CHARS,
+                "note": "Snippet is empty or over the %d-char share limit."
+                        % SHARED_MAX_CHARS,
+            }), 413
+        path = url_for("sandbox")
+        return jsonify({
+            "ok": True, "link": path + "#c=" + token, "token": token,
+            "chars": len(code.strip()), "max_chars": SHARED_MAX_CHARS,
+        }), 200
+    # GET: reverse lookup for ?c=<token>
+    token = request.args.get("c", "")
+    code = decode_share(token) if token else None
+    if code is None:
+        return jsonify({"ok": False, "code": "", "chars": 0,
+                        "note": "No valid snippet in this link."}), 200
+    return jsonify({"ok": True, "code": code, "chars": len(code),
+                    "max_chars": SHARED_MAX_CHARS}), 200
+
+
 @app.route("/api/compute/history")
 def api_compute_history():
     from compute import get_compute_history
@@ -1022,6 +1063,9 @@ _API_CHECKS = [
     ("/api/research/search?q=ai", "papers", list, False),  # may honestly be 0 hits
     ("/api/compute/capabilities", "max_concurrent", int, True),
     ("/api/compute/history", "entries", list, False),  # may legitimately be empty
+    # Shareable workbench link (reverse lookup). cHJpbnQoMSk is the base64url of
+    # "print(1)" — a guaranteed-valid token so the probe is deterministically 200.
+    ("/api/compute/share?c=cHJpbnQoMSk", "code", str, True),
     # Live egress probe — proves the service can actually reach the internet.
     # This is the endpoint that turns the "features silently fall back to cache
     # when the proxy env is missing" regression into a visible health failure.

@@ -72,6 +72,7 @@ MAX_IMAGES = 3                  # at most 3 figures per run (keep responses smal
 MAX_IMAGE_PIXELS = (1600, 1200) # cap per-figure resolution
 FIG_DPI = 100                   # render DPI
 FIG_SIZE = (7, 4.5)             # default figure size in inches
+SHARED_MAX_CHARS = 4000         # cap a shareable snippet (URL length + honest limit)
 
 # The child interpreter runs isolated (-I) and executes this harness. User code
 # is read from stdin. A single JSON line is written to stderr so the parent can
@@ -354,6 +355,48 @@ def _child_env():
         "MPLCONFIGDIR": _MPLCONFIG_DIR,
     })
     return env
+
+
+def encode_share(code):
+    """Encode a snippet into a URL-safe token for a shareable workbench link.
+
+    The snippet lives in the URL *fragment* (``#c=<token>``), which the browser
+    never sends to the server — so a share link is just data on the client, not
+    a stored object. ``base64.urlsafe_b64encode`` keeps it fragment-safe
+    (no ``+``/``/``); newlines are preserved on decode so the snippet restores
+    byte-for-byte. Snippets over ``SHARED_MAX_CHARS`` are refused (returns
+    ``None``) so a link can never balloon past browser URL limits.
+    """
+    if not isinstance(code, str):
+        return None
+    code = code.strip()
+    if not code or len(code) > SHARED_MAX_CHARS:
+        return None
+    b = base64.urlsafe_b64encode(code.encode("utf-8")).rstrip(b"=")
+    return b.decode("ascii")
+
+
+def decode_share(token):
+    """Inverse of :func:`encode_share` — restore a snippet from a URL token.
+
+    Tolerant of missing padding (re-added before decode). Returns ``None`` for a
+    non-string or unparsable token (never raises), so a hand-edited/mangled link
+    degrades to an empty workbench instead of an error.
+    """
+    if not isinstance(token, str) or not token:
+        return None
+    tok = token.strip()
+    if not tok:
+        return None
+    pad = "=" * (-len(tok) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(tok + pad)
+        text = raw.decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not text.strip() or len(text) > SHARED_MAX_CHARS:
+        return None
+    return text
 
 
 def _interpret(rc, out, err, timed_out):

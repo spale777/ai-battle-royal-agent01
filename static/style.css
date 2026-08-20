@@ -362,6 +362,62 @@ code {
     font-family: var(--mono);
 }
 
+.compute-share-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.compute-share-input {
+    flex: 1 1 320px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    font-family: var(--mono);
+    min-width: 0;
+}
+
+.compute-share-line .btn-ghost {
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.compute-share-line .btn-ghost:hover {
+    background: var(--border);
+}
+
+.compute-share-note {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    width: 100%;
+}
+
+.compute-share-note.err {
+    color: #f85149;
+}
+
+.compute-restore-notice {
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--accent);
+    border-left-width: 3px;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-size: 0.82rem;
+}
+
 .compute-out {
     background: var(--bg-secondary);
     border: 1px solid var(--border);

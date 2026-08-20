@@ -252,6 +252,129 @@ def test_api_compute_history_shape(client):
     assert isinstance(data["entries"], list)
 
 
+# ---- shareable links (snippet in the URL fragment) --------------------------
+
+def test_share_roundtrip_simple():
+    code = "print(6 * 7)"
+    tok = compute.encode_share(code)
+    assert tok is not None
+    assert compute.decode_share(tok) == code
+
+
+def test_share_roundtrip_newlines_and_unicode():
+    code = "x = [1, 2, 3]\n# ünïcödé café\nprint(sum(x))"
+    tok = compute.encode_share(code)
+    assert compute.decode_share(tok) == code
+
+
+def test_share_token_is_fragment_safe():
+    """A share token must not contain +/ or whitespace (would break a URL fragment)."""
+    tok = compute.encode_share("print('a b + c / d')")
+    assert tok is not None
+    for bad in ("+", "/", " ", "=", "%"):
+        assert bad not in tok
+
+
+def test_share_rejects_over_cap():
+    code = "x = " + ("1" * (compute.SHARED_MAX_CHARS + 1))
+    assert compute.encode_share(code) is None
+
+
+def test_share_boundary_at_cap_roundtrips():
+    code = "x = " + ("1" * (compute.SHARED_MAX_CHARS - len("x = ")))
+    tok = compute.encode_share(code)
+    assert tok is not None
+    assert compute.decode_share(tok) == code
+
+
+def test_share_rejects_non_string():
+    assert compute.encode_share(None) is None
+    assert compute.encode_share(42) is None
+    assert compute.encode_share(["print(1)"]) is None
+
+
+def test_share_rejects_empty():
+    assert compute.encode_share("") is None
+    assert compute.encode_share("   \n  ") is None
+
+
+def test_decode_share_tolerates_mangled_token():
+    assert compute.decode_share("") is None
+    assert compute.decode_share(None) is None
+    assert compute.decode_share(123) is None
+    assert compute.decode_share("!!!not-base64!!!") is None  # garbage -> None, not raise
+
+
+def test_decode_share_rejects_over_cap_after_decode():
+    # A token that decodes to something over the cap is refused.
+    code = "x = " + ("1" * (compute.SHARED_MAX_CHARS + 1))
+    tok = compute.encode_share(code)
+    assert tok is None  # encode already refuses; nothing to decode
+
+
+def test_api_share_post_returns_link(client):
+    code = "print(6 * 7)"
+    resp = client.post("/api/compute/share", json={"code": code})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["token"] is not None
+    assert data["link"].endswith("#c=" + data["token"])
+    assert "/sandbox" in data["link"]
+    assert data["chars"] == len(code)
+    assert data["max_chars"] == compute.SHARED_MAX_CHARS
+    # The token must round-trip back to the exact snippet.
+    assert compute.decode_share(data["token"]) == code
+
+
+def test_api_share_post_rejects_over_cap(client):
+    code = "x = " + ("1" * (compute.SHARED_MAX_CHARS + 1))
+    resp = client.post("/api/compute/share", json={"code": code})
+    assert resp.status_code == 413
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert data["link"] is None
+
+
+def test_api_share_post_rejects_empty(client):
+    resp = client.post("/api/compute/share", json={"code": "   "})
+    assert resp.status_code == 413
+    assert resp.get_json()["ok"] is False
+
+
+def test_api_share_get_roundtrips(client):
+    code = "print(6 * 7)"
+    tok = compute.encode_share(code)
+    assert tok is not None
+    resp = client.get("/api/compute/share?c=" + tok)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["code"] == code
+
+
+def test_api_share_get_mangled_is_not_an_error(client):
+    resp = client.get("/api/compute/share?c=!!!bad!!!")
+    assert resp.status_code == 200  # a mangled link degrades, never 500s
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert data["code"] == ""
+
+
+def test_api_share_get_no_token(client):
+    resp = client.get("/api/compute/share")
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is False
+
+
+def test_sandbox_page_has_share_controls(client):
+    html = client.get("/sandbox").get_data(as_text=True)
+    assert 'id="compute-share"' in html      # Share button
+    assert 'id="compute-share-url"' in html  # read-only link field
+    assert 'id="compute-restore-notice"' in html  # restore banner
+    assert "/api/compute/share" in html        # client talks to the share endpoint
+
+
 def test_sandbox_page_has_workbench(client):
     html = client.get("/sandbox").get_data(as_text=True)
     assert 'id="compute-code"' in html
