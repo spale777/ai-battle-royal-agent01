@@ -3,6 +3,39 @@
 {% block tagline %}<p class="tagline">Latest papers from arXiv — AI, ML, NLP, CV</p>{% endblock %}
 
 {% block content %}
+<section class="arxiv-search">
+    <h2>Search arXiv</h2>
+    <p class="section-desc">
+        Query the full arXiv corpus in real time — not just the 20 papers in the
+        digest below. If arXiv is unreachable we fall back to the cached digest
+        and say so.
+    </p>
+    <form class="arxiv-search-form" id="arxiv-search-form" autocomplete="off">
+        <input type="search" class="arxiv-q" id="arxiv-q"
+               placeholder='e.g. "diffusion models", "protein folding", "reinforcement learning"'
+               spellcheck="false" required minlength="2" maxlength="200">
+        <div class="arxiv-controls">
+            <label>field
+                <select id="arxiv-field">
+                    <option value="all" selected>all</option>
+                    <option value="ti">title</option>
+                    <option value="au">author</option>
+                    <option value="abs">abstract</option>
+                </select>
+            </label>
+            <label>sort by
+                <select id="arxiv-sort">
+                    <option value="relevance" selected>relevance</option>
+                    <option value="date">newest</option>
+                </select>
+            </label>
+            <button type="submit" id="arxiv-go">Search</button>
+        </div>
+    </form>
+    <div id="arxiv-status" class="arxiv-status" aria-live="polite"></div>
+    <div id="arxiv-results"></div>
+</section>
+
 <section>
     <h2>Research Digest</h2>
     <p class="section-desc">
@@ -77,6 +110,141 @@
             document.getElementById('cache-time').textContent = `Cached at ${d.toLocaleString()}.`;
         }
     }
+
+    // Live arXiv search (outward-facing): POST-free, one GET to
+    // /api/research/search, render the results. Text built via textContent
+    // (no innerHTML with untrusted data) so the strict CSP needs nothing new.
+    (function () {
+        var form = document.getElementById('arxiv-search-form');
+        if (!form) return;
+        var q = document.getElementById('arxiv-q');
+        var field = document.getElementById('arxiv-field');
+        var sort = document.getElementById('arxiv-sort');
+        var status = document.getElementById('arxiv-status');
+        var results = document.getElementById('arxiv-results');
+        var go = document.getElementById('arxiv-go');
+
+        function render(papers, source) {
+            results.innerHTML = '';
+            if (!papers || !papers.length) {
+                var p = document.createElement('p');
+                p.className = 'research-empty';
+                p.textContent = source === 'arxiv'
+                    ? 'No matches on arXiv for that query.'
+                    : 'No matches in the cached digest for that query.';
+                results.appendChild(p);
+                return;
+            }
+            var list = document.createElement('div');
+            list.className = 'paper-list arxiv-paper-list';
+            papers.forEach(function (p) {
+                var card = document.createElement('article');
+                card.className = 'paper-card';
+                var header = document.createElement('div');
+                header.className = 'paper-header';
+                var h3 = document.createElement('h3');
+                var a = document.createElement('a');
+                a.href = 'https://arxiv.org/abs/' + p.arxiv_id;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = p.title || '(untitled)';
+                h3.appendChild(a);
+                var pid = document.createElement('span');
+                pid.className = 'paper-id';
+                var a2 = document.createElement('a');
+                a2.href = 'https://arxiv.org/abs/' + p.arxiv_id;
+                a2.target = '_blank';
+                a2.rel = 'noopener';
+                a2.textContent = p.arxiv_id;
+                pid.appendChild(a2);
+                header.appendChild(h3);
+                header.appendChild(pid);
+                card.appendChild(header);
+
+                var meta = document.createElement('div');
+                meta.className = 'paper-meta';
+                var d = document.createElement('span');
+                d.className = 'paper-date';
+                d.textContent = p.published || '';
+                var au = document.createElement('span');
+                au.className = 'paper-authors';
+                au.textContent = p.authors || '';
+                meta.appendChild(d);
+                meta.appendChild(au);
+                card.appendChild(meta);
+
+                if (p.summary) {
+                    var sum = document.createElement('p');
+                    sum.className = 'paper-summary';
+                    sum.textContent = p.summary;
+                    card.appendChild(sum);
+                }
+                if (p.categories && p.categories.length) {
+                    var cats = document.createElement('div');
+                    cats.className = 'paper-cats';
+                    p.categories.slice(0, 4).forEach(function (c) {
+                        var t = document.createElement('span');
+                        t.className = 'cat-tag' + (c === p.primary_category ? ' primary' : '');
+                        t.textContent = c;
+                        cats.appendChild(t);
+                    });
+                    card.appendChild(cats);
+                }
+                list.appendChild(card);
+            });
+            results.appendChild(list);
+        }
+
+        function setStatus(html) {
+            // Status is our own text (no untrusted data) — safe to set directly.
+            status.innerHTML = html;
+        }
+
+        function run() {
+            var query = (q.value || '').trim();
+            if (query.length < 2) {
+                setStatus('<span class="arxiv-err">Type at least 2 characters to search.</span>');
+                results.innerHTML = '';
+                return;
+            }
+            var params = new URLSearchParams({
+                q: query,
+                field: field.value,
+                sort: sort.value,
+                max: 12
+            });
+            go.disabled = true;
+            go.textContent = 'Searching…';
+            setStatus('<span class="arxiv-busy">Querying arXiv…</span>');
+            results.innerHTML = '';
+            fetch('/api/research/search?' + params.toString())
+                .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+                .then(function (res) {
+                    var j = res.j;
+                    var source = j.source;
+                    var total = j.total_results;
+                    if (source === 'arxiv') {
+                        var label = (total != null) ? ('Live results from arXiv · ' + total + ' total') : 'Live results from arXiv';
+                        setStatus('<span class="arxiv-src arxiv-src-live">● live</span> ' + label);
+                    } else if (source === 'cache') {
+                        setStatus('<span class="arxiv-src arxiv-src-fallback">● fallback</span> ' + (j.message || 'cached digest'));
+                    } else {
+                        setStatus('<span class="arxiv-err">' + (j.message || 'No results.') + '</span>');
+                    }
+                    render(j.papers, source);
+                })
+                .catch(function (e) {
+                    setStatus('<span class="arxiv-err">Request failed: ' + e + '</span>');
+                    results.innerHTML = '';
+                })
+                .finally(function () {
+                    go.disabled = false;
+                    go.textContent = 'Search';
+                });
+        }
+
+        form.addEventListener('submit', function (e) { e.preventDefault(); run(); });
+    })();
 
     // Client-side category filter + text search over the digest (no new endpoint).
     (function () {

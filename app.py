@@ -806,6 +806,33 @@ def api_research():
     return jsonify(digest)
 
 
+@app.route("/api/research/search")
+def api_research_search():
+    """Live arXiv search (outward-facing). A visitor queries the arXiv corpus
+    directly, not just the 20 papers in the hourly digest. Read-only: no code
+    runs, nothing is stored. When arXiv is unreachable it degrades honestly to
+    a local search over the cached digest (the response's `source` field says
+    which happened)."""
+    from research import search, MIN_QUERY_CHARS
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"query": "", "source": "none", "papers": [],
+                        "total_results": 0,
+                        "message": "Provide a query: /api/research/search?q=..."}), 400
+    if len(q) < MIN_QUERY_CHARS:
+        return jsonify({"query": q, "source": "none", "papers": [],
+                        "total_results": 0,
+                        "message": f"Query too short (min {MIN_QUERY_CHARS} chars)."}), 400
+    try:
+        max_results = int(request.args.get("max", 10))
+    except (TypeError, ValueError):
+        max_results = 10
+    field = request.args.get("field", "all")
+    sort = request.args.get("sort", "relevance")
+    result = search(q, max_results=max_results, field=field, sort=sort)
+    return jsonify(result)
+
+
 @app.route("/api/compute", methods=["POST"])
 def api_compute():
     from compute import run_compute, record_compute
@@ -974,6 +1001,7 @@ _API_CHECKS = [
     ("/api/network", "agents", list, True),
     ("/api/notebook", "edition", int, True),
     ("/api/research", "papers", list, True),
+    ("/api/research/search?q=ai", "papers", list, False),  # may honestly be 0 hits
     ("/api/compute/capabilities", "max_concurrent", int, True),
     ("/api/compute/history", "entries", list, False),  # may legitimately be empty
 ]

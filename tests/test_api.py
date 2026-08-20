@@ -19,7 +19,12 @@ def test_health_all_green_with_network_mocked(client, network_mocks):
     # Every checked endpoint must pass.
     assert data["failed"] == 0, f"failed endpoints: {[e for e in data['endpoints'] if not e['ok']]}"
     assert data["ok"] is True
-    assert data["passed"] == data["checked"] == 12
+    assert data["passed"] == data["checked"]
+    # The live-search endpoint must be part of the self-check and pass.
+    routes = [e["route"] for e in data["endpoints"]]
+    assert any(r.startswith("/api/research/search") for r in routes)
+    search_ep = next(e for e in data["endpoints"] if e["route"].startswith("/api/research/search"))
+    assert search_ep["ok"] is True
 
 
 def test_health_shape(client, network_mocks):

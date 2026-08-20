@@ -2,6 +2,7 @@
 
 import json
 import os
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -21,18 +22,13 @@ CATEGORIES = [
 NS = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
 
-def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
-    """Query arXiv API for recent papers in a category."""
-    url = (
-        f"https://export.arxiv.org/api/query"
-        f"?search_query=cat:{category}"
-        f"&sortBy=submittedDate&sortOrder=descending"
-        f"&max_results={max_results}"
-    )
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        root = ET.fromstring(resp.read())
+def _parse_entries(root) -> list[dict]:
+    """Parse an arXiv Atom feed into a list of paper dicts.
 
+    Shared by the category digest fetcher and the live search so both render
+    the exact same paper shape (title, arxiv_id, published, authors, summary,
+    categories, primary_category). Python 3.13: test Element attributes/text
+    explicitly — never an element's truth value (deprecated, always True)."""
     papers = []
     for entry in root.findall("a:entry", NS):
         title_t = entry.find("a:title", NS)
@@ -73,6 +69,142 @@ def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
         })
 
     return papers
+
+
+def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
+    """Query arXiv API for recent papers in a category."""
+    url = (
+        f"https://export.arxiv.org/api/query"
+        f"?search_query=cat:{category}"
+        f"&sortBy=submittedDate&sortOrder=descending"
+        f"&max_results={max_results}"
+    )
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        root = ET.fromstring(resp.read())
+    return _parse_entries(root)
+
+
+# --- Live arXiv search (outward-facing: lets a visitor query the corpus) ---
+#
+# This is read-only: it sends a query to arXiv and returns their results. No
+# code runs, no data is stored, no personal information is involved. When arXiv
+# is unreachable (transient proxy blips happen), it degrades honestly to a local
+# search over the cached digest and says so via the `source` field.
+
+_ARXIV_API = "https://export.arxiv.org/api/query"
+_OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
+
+# Field prefixes the arXiv API supports for scoped queries. Kept explicit so a
+# visitor cannot inject an arbitrary prefix.
+ALLOWED_FIELDS = ("all", "ti", "au", "abs")
+# Sort options exposed to the UI.
+ALLOWED_SORTS = ("relevance", "date")
+
+MIN_QUERY_CHARS = 2
+MAX_QUERY_CHARS = 200
+MAX_RESULTS_CAP = 30  # arXiv allows up to 30 per page; keep the UI light.
+
+
+def _total_results(root) -> int:
+    """Read opensearch:totalResults from an arXiv feed (0 if absent)."""
+    t = root.find(f"{{{_OPENSEARCH_NS}}}totalResults")
+    if t is not None and t.text:
+        try:
+            return int(t.text)
+        except ValueError:
+            return 0
+    return 0
+
+
+def search_arxiv_live(query: str, max_results: int = 10,
+                      field: str = "all", sort: str = "relevance"):
+    """Run one live query against the arXiv API.
+
+    Returns (papers, total_results) on success. Raises on network/parse error
+    so the caller can fall back to the cached digest. `field`/`sort` must be in
+    the allow-lists (validated by `search`, but defensively re-checked here so
+    this function is safe to call directly too).
+    """
+    field = field if field in ALLOWED_FIELDS else "all"
+    sort = sort if sort in ALLOWED_SORTS else "relevance"
+    sort_param = "relevance" if sort == "relevance" else "submittedDate"
+
+    url = (
+        f"{_ARXIV_API}?search_query={field}:{urllib.parse.quote(query)}"
+        f"&sortBy={sort_param}"
+        f"&sortOrder=descending"
+        f"&max_results={max_results}"
+    )
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        root = ET.fromstring(resp.read())
+    return _parse_entries(root), _total_results(root)
+
+
+def _local_search(papers: list[dict], q: str) -> list[dict]:
+    """Case-insensitive substring search over a paper list's title, authors,
+    id, categories, and summary. Pure and deterministic (easy to test)."""
+    q = q.lower()
+    out = []
+    for p in papers:
+        hay = " ".join([
+            p.get("title", ""), p.get("authors", ""), p.get("arxiv_id", ""),
+            " ".join(p.get("categories", [])), p.get("summary", ""),
+        ]).lower()
+        if q in hay:
+            out.append(p)
+    return out
+
+
+def search(query: str, max_results: int = 10, field: str = "all",
+           sort: str = "relevance") -> dict:
+    """Search arXiv live; fall back to the cached digest when the live fetch
+    fails. Always returns a JSON-safe dict with an honest `source`:
+
+      - "arxiv"   -> results came from a live arXiv query (total_results set).
+      - "cache"   -> live fetch failed; results are a local search over the
+                     cached digest (up to `max_results`, total_results=None).
+
+    This is the outward-facing capability: a visitor can search the whole arXiv
+    corpus, not just the 20 papers in the hourly digest. Read-only — no code
+    runs, nothing is stored, no personal data is involved.
+    """
+    q = (query or "").strip()
+    if len(q) < MIN_QUERY_CHARS:
+        return {"query": q, "source": "none", "papers": [], "total_results": 0,
+                "message": "Query too short (min 2 chars)."}
+
+    max_results = max(1, min(int(max_results), MAX_RESULTS_CAP))
+    field = field if field in ALLOWED_FIELDS else "all"
+    sort = sort if sort in ALLOWED_SORTS else "relevance"
+
+    try:
+        papers, total = search_arxiv_live(q, max_results, field, sort)
+        if papers:
+            return {"query": q, "source": "arxiv", "papers": papers,
+                    "total_results": total, "field": field, "sort": sort}
+        # Live succeeded but returned zero hits — that's a real answer, not a
+        # fallback. Don't hide it behind stale cache data.
+        return {"query": q, "source": "arxiv", "papers": [], "total_results": 0,
+                "field": field, "sort": sort,
+                "message": "No matches on arXiv for this query."}
+    except Exception:
+        pass
+
+    # Fallback: search the cached digest locally, and be honest about it.
+    try:
+        digest = get_research_digest()
+        cache_papers = digest.get("papers", [])
+    except Exception:
+        cache_papers = []
+    hits = _local_search(cache_papers, q)[:max_results]
+    return {
+        "query": q, "source": "cache", "papers": hits, "total_results": None,
+        "field": field, "sort": sort,
+        "message": ("arXiv is unreachable right now — showing matches from the "
+                    "cached digest (last few days, ~20 papers) instead."),
+    }
 
 
 def category_breakdown(papers: list[dict]) -> dict:

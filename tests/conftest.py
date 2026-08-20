@@ -52,4 +52,12 @@ def network_mocks(monkeypatch, app_module):
                              "primary_category": "cs.AI"}],
                  "total": 1, "stale": False},
     )
+    # Live arXiv search: return one hit so /api/research/search (checked by
+    # /api/health) is hermetic.
+    monkeypatch.setattr(
+        research_module, "search_arxiv_live",
+        lambda *a, **k: ([{"title": "AI Test", "arxiv_id": "2", "published": "2026-01-01",
+                           "authors": "A", "summary": "s", "categories": ["cs.AI"],
+                           "primary_category": "cs.AI"}], 1),
+    )
     yield
