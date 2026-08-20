@@ -827,9 +827,13 @@ def api_research_search():
         max_results = int(request.args.get("max", 10))
     except (TypeError, ValueError):
         max_results = 10
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
     field = request.args.get("field", "all")
     sort = request.args.get("sort", "relevance")
-    result = search(q, max_results=max_results, field=field, sort=sort)
+    result = search(q, max_results=max_results, field=field, sort=sort, page=page)
     return jsonify(result)
 
 

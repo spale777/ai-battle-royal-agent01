@@ -34,6 +34,7 @@
     </form>
     <div id="arxiv-status" class="arxiv-status" aria-live="polite"></div>
     <div id="arxiv-results"></div>
+    <div id="arxiv-pager" class="arxiv-pager" aria-live="polite"></div>
 </section>
 
 <section>
@@ -111,9 +112,12 @@
         }
     }
 
-    // Live arXiv search (outward-facing): POST-free, one GET to
-    // /api/research/search, render the results. Text built via textContent
-    // (no innerHTML with untrusted data) so the strict CSP needs nothing new.
+    // Live arXiv search (outward-facing): one GET to /api/research/search per
+    // page, render the results. Text built via textContent (no innerHTML with
+    // untrusted data) so the strict CSP needs nothing new. The current query +
+    // page are mirrored into the URL (history.replaceState) so the address bar
+    // is itself a shareable permalink, and a deep link (?q=...&page=N) restores
+    // the search on load.
     (function () {
         var form = document.getElementById('arxiv-search-form');
         if (!form) return;
@@ -122,7 +126,9 @@
         var sort = document.getElementById('arxiv-sort');
         var status = document.getElementById('arxiv-status');
         var results = document.getElementById('arxiv-results');
+        var pager = document.getElementById('arxiv-pager');
         var go = document.getElementById('arxiv-go');
+        var MAX = 12;  // page size — keep the UI light (arXiv caps at 30)
 
         function render(papers, source) {
             results.innerHTML = '';
@@ -200,23 +206,102 @@
             status.innerHTML = html;
         }
 
-        function run() {
+        // Mirror the live query into the URL so the address bar is a permalink.
+        function syncUrl(query, f, s, page) {
+            var params = new URLSearchParams();
+            params.set('q', query);
+            if (f && f !== 'all') params.set('field', f);
+            if (s && s !== 'relevance') params.set('sort', s);
+            if (page > 1) params.set('page', String(page));
+            var qs = params.toString();
+            var url = '/research' + (qs ? '?' + qs : '');
+            try { history.replaceState(null, '', url); } catch (e) { /* noop */ }
+        }
+
+        function clearPager() { pager.innerHTML = ''; }
+
+        function makeBtn(label, onClick, disabled) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            if (disabled) b.disabled = true;
+            else b.addEventListener('click', onClick);
+            return b;
+        }
+
+        // Pager for a live (source==='arxiv') response: prev/next + "Page X of Y"
+        // + a copy-permalink button. Built entirely from textContent + buttons.
+        function renderPager(j) {
+            clearPager();
+            if (j.source !== 'arxiv') return;  // cache digest has no real pages
+            var page = j.page || 1;
+            var total = j.total_pages || 0;
+
+            pager.appendChild(makeBtn('← Prev', function () { doSearch(page - 1); }, !j.prev_page));
+
+            var info = document.createElement('span');
+            info.className = 'arxiv-pageinfo';
+            info.textContent = total
+                ? ('Page ' + page + ' of ' + total)
+                : ('Page ' + page + (j.total_results ? ' · ' + j.total_results + ' total' : ''));
+            pager.appendChild(info);
+
+            pager.appendChild(makeBtn('Next →', function () { doSearch(page + 1); }, !j.next_page));
+
+            var share = document.createElement('span');
+            share.className = 'arxiv-share';
+            var shareBtn = document.createElement('button');
+            shareBtn.type = 'button';
+            shareBtn.className = 'arxiv-share-btn';
+            shareBtn.textContent = 'Copy link';
+            var note = document.createElement('span');
+            note.className = 'arxiv-share-note';
+            note.style.display = 'none';
+            note.textContent = 'copied ✓';
+            shareBtn.addEventListener('click', function () {
+                var url = location.href;
+                function done(ok) {
+                    note.style.display = ok ? 'inline' : 'none';
+                    if (ok) setTimeout(function () { note.style.display = 'none'; }, 1800);
+                }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).then(function () { done(true); },
+                                                            function () { done(false); });
+                } else {
+                    // Non-secure-context fallback: temp input + execCommand.
+                    var inp = document.createElement('input');
+                    inp.value = url; document.body.appendChild(inp);
+                    inp.select();
+                    var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+                    document.body.removeChild(inp); done(ok);
+                }
+            });
+            share.appendChild(shareBtn);
+            share.appendChild(note);
+            pager.appendChild(share);
+        }
+
+        function doSearch(pageOverride) {
             var query = (q.value || '').trim();
             if (query.length < 2) {
                 setStatus('<span class="arxiv-err">Type at least 2 characters to search.</span>');
                 results.innerHTML = '';
+                clearPager();
                 return;
             }
+            var page = Math.max(1, pageOverride || 1);
             var params = new URLSearchParams({
                 q: query,
                 field: field.value,
                 sort: sort.value,
-                max: 12
+                max: MAX,
+                page: page
             });
             go.disabled = true;
             go.textContent = 'Searching…';
             setStatus('<span class="arxiv-busy">Querying arXiv…</span>');
             results.innerHTML = '';
+            clearPager();
             fetch('/api/research/search?' + params.toString())
                 .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
@@ -226,16 +311,19 @@
                     if (source === 'arxiv') {
                         var label = (total != null) ? ('Live results from arXiv · ' + total + ' total') : 'Live results from arXiv';
                         setStatus('<span class="arxiv-src arxiv-src-live">● live</span> ' + label);
+                        syncUrl(query, field.value, sort.value, page);
                     } else if (source === 'cache') {
                         setStatus('<span class="arxiv-src arxiv-src-fallback">● fallback</span> ' + (j.message || 'cached digest'));
                     } else {
                         setStatus('<span class="arxiv-err">' + (j.message || 'No results.') + '</span>');
                     }
                     render(j.papers, source);
+                    renderPager(j);
                 })
                 .catch(function (e) {
                     setStatus('<span class="arxiv-err">Request failed: ' + e + '</span>');
                     results.innerHTML = '';
+                    clearPager();
                 })
                 .finally(function () {
                     go.disabled = false;
@@ -243,7 +331,19 @@
                 });
         }
 
-        form.addEventListener('submit', function (e) { e.preventDefault(); run(); });
+        form.addEventListener('submit', function (e) { e.preventDefault(); doSearch(1); });
+
+        // Deep link: /research?q=...&field=...&sort=...&page=N restores a search.
+        (function restore() {
+            var sp = new URLSearchParams(location.search);
+            var query = (sp.get('q') || '').trim();
+            if (query.length < 2) return;
+            q.value = query;
+            var f = sp.get('field'); if (f && ['all', 'ti', 'au', 'abs'].indexOf(f) !== -1) field.value = f;
+            var s = sp.get('sort'); if (s && ['relevance', 'date'].indexOf(s) !== -1) sort.value = s;
+            var p = parseInt(sp.get('page'), 10); if (!p || p < 1) p = 1;
+            doSearch(p);
+        })();
     })();
 
     // Client-side category filter + text search over the digest (no new endpoint).

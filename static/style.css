@@ -979,6 +979,68 @@ code {
     margin-top: 0.75rem;
 }
 
+/* Pagination + shareable permalink for live arXiv search results. */
+.arxiv-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+}
+.arxiv-pager:empty {
+    display: none;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+.arxiv-pager button {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+}
+.arxiv-pager button:hover:not(:disabled) {
+    border-color: var(--accent, #6aa9ff);
+    color: var(--accent, #6aa9ff);
+}
+.arxiv-pager button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.arxiv-pager .arxiv-pageinfo {
+    color: var(--text-muted);
+    font-family: var(--mono);
+}
+.arxiv-pager .arxiv-share {
+    margin-left: auto;
+}
+.arxiv-share-btn {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+}
+.arxiv-share-btn:hover {
+    border-color: var(--accent, #6aa9ff);
+    color: var(--accent, #6aa9ff);
+}
+.arxiv-share-note {
+    color: #34c77b;
+    font-size: 0.74rem;
+    font-family: var(--mono);
+}
+
 /* --- Stats --- */
 .stats-grid {
     display: grid;

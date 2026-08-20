@@ -118,23 +118,31 @@ def _total_results(root) -> int:
 
 
 def search_arxiv_live(query: str, max_results: int = 10,
-                      field: str = "all", sort: str = "relevance"):
+                      field: str = "all", sort: str = "relevance",
+                      start: int = 0):
     """Run one live query against the arXiv API.
 
     Returns (papers, total_results) on success. Raises on network/parse error
     so the caller can fall back to the cached digest. `field`/`sort` must be in
     the allow-lists (validated by `search`, but defensively re-checked here so
     this function is safe to call directly too).
+
+    `start` is arXiv's zero-based result offset, used for pagination:
+    page N of `max_results`-per-page is `start = (N-1) * max_results`. Without
+    it a visitor sees only the top of a "1,259,403 total" count; with it they
+    can page through the real results.
     """
     field = field if field in ALLOWED_FIELDS else "all"
     sort = sort if sort in ALLOWED_SORTS else "relevance"
     sort_param = "relevance" if sort == "relevance" else "submittedDate"
+    start = max(0, int(start))
 
     url = (
         f"{_ARXIV_API}?search_query={field}:{urllib.parse.quote(query)}"
         f"&sortBy={sort_param}"
         f"&sortOrder=descending"
         f"&max_results={max_results}"
+        f"&start={start}"
     )
     req = urllib.request.Request(url)
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -157,42 +165,74 @@ def _local_search(papers: list[dict], q: str) -> list[dict]:
     return out
 
 
+def _page_meta(total, max_results, page):
+    """Compute 1-based pagination metadata from a result total.
+
+    Pure. `per_page` is the requested page size (already clamped), `page` is the
+    1-based page requested, `total_pages` is the number of pages needed to cover
+    `total` results (0 when there are none), and `next_page`/`prev_page` are the
+    adjacent pages when they exist (else None). A page beyond total_pages is
+    not an error — arXiv returns an empty result set and we surface that honestly.
+    """
+    total_pages = 0 if total is None else (max(0, total) + max_results - 1) // max_results
+    prev = page - 1 if page > 1 else None
+    # No "next" once the current page is the last full page (or beyond it).
+    next_page = page + 1 if (total_pages and page < total_pages) else None
+    return {
+        "per_page": max_results,
+        "page": page,
+        "total_pages": total_pages,
+        "next_page": next_page,
+        "prev_page": prev,
+    }
+
+
 def search(query: str, max_results: int = 10, field: str = "all",
-           sort: str = "relevance") -> dict:
+           sort: str = "relevance", page: int = 1) -> dict:
     """Search arXiv live; fall back to the cached digest when the live fetch
     fails. Always returns a JSON-safe dict with an honest `source`:
 
-      - "arxiv"   -> results came from a live arXiv query (total_results set).
+      - "arxiv"   -> results came from a live arXiv query (total_results set,
+                     and `page`/`total_pages` metadata for pagination).
       - "cache"   -> live fetch failed; results are a local search over the
                      cached digest (up to `max_results`, total_results=None).
+                     The digest is small so pagination is meaningless there —
+                     the page metadata reports a single page.
 
     This is the outward-facing capability: a visitor can search the whole arXiv
-    corpus, not just the 20 papers in the hourly digest. Read-only — no code
-    runs, nothing is stored, no personal data is involved.
+    corpus, not just the 20 papers in the hourly digest, and page through the
+    real results (arXiv `start=` offset). Read-only — no code runs, nothing is
+    stored, no personal data is involved.
     """
     q = (query or "").strip()
     if len(q) < MIN_QUERY_CHARS:
         return {"query": q, "source": "none", "papers": [], "total_results": 0,
+                "page": 1, "per_page": max_results, "total_pages": 0,
+                "next_page": None, "prev_page": None,
                 "message": "Query too short (min 2 chars)."}
 
     max_results = max(1, min(int(max_results), MAX_RESULTS_CAP))
     field = field if field in ALLOWED_FIELDS else "all"
     sort = sort if sort in ALLOWED_SORTS else "relevance"
+    page = max(1, int(page))  # 1-based; negative/zero clamp to the first page
+    start = (page - 1) * max_results
 
     try:
-        papers, total = search_arxiv_live(q, max_results, field, sort)
+        papers, total = search_arxiv_live(q, max_results, field, sort, start)
+        meta = _page_meta(total, max_results, page)
         if papers:
             return {"query": q, "source": "arxiv", "papers": papers,
-                    "total_results": total, "field": field, "sort": sort}
+                    "total_results": total, "field": field, "sort": sort, **meta}
         # Live succeeded but returned zero hits — that's a real answer, not a
-        # fallback. Don't hide it behind stale cache data.
-        return {"query": q, "source": "arxiv", "papers": [], "total_results": 0,
-                "field": field, "sort": sort,
+        # fallback. A page past the end also lands here (arXiv returns empty).
+        return {"query": q, "source": "arxiv", "papers": [], "total_results": total,
+                "field": field, "sort": sort, **meta,
                 "message": "No matches on arXiv for this query."}
     except Exception:
         pass
 
-    # Fallback: search the cached digest locally, and be honest about it.
+    # Fallback: search the cached digest locally, and be honest about it. The
+    # digest is small, so the whole result fits on one page.
     try:
         digest = get_research_digest()
         cache_papers = digest.get("papers", [])
@@ -202,6 +242,8 @@ def search(query: str, max_results: int = 10, field: str = "all",
     return {
         "query": q, "source": "cache", "papers": hits, "total_results": None,
         "field": field, "sort": sort,
+        "page": 1, "per_page": max_results, "total_pages": 1 if hits else 0,
+        "next_page": None, "prev_page": None,
         "message": ("arXiv is unreachable right now — showing matches from the "
                     "cached digest (last few days, ~20 papers) instead."),
     }

@@ -134,7 +134,7 @@ def test_search_fallback_with_empty_cache(monkeypatch):
 
 def test_search_clamps_max_to_cap(monkeypatch):
     captured = {}
-    def fake(q, max_results, field, sort):
+    def fake(q, max_results, field, sort, start=0):
         captured["max"] = max_results
         return ([_paper()], 1)
     monkeypatch.setattr(research, "search_arxiv_live", fake)
@@ -144,7 +144,7 @@ def test_search_clamps_max_to_cap(monkeypatch):
 
 def test_search_normalizes_field_and_sort(monkeypatch):
     captured = {}
-    def fake(q, max_results, field, sort):
+    def fake(q, max_results, field, sort, start=0):
         captured["field"] = field
         captured["sort"] = sort
         return ([_paper()], 1)
@@ -226,3 +226,147 @@ def test_research_page_has_search_form(client, monkeypatch):
     assert 'id="arxiv-q"' in html
     assert 'id="arxiv-results"' in html
     assert "Search arXiv" in html
+
+
+# ---------------------------------------------------------------------------
+# Pagination (page / start / page metadata)
+# ---------------------------------------------------------------------------
+
+def test_page_meta_computes_total_pages_and_neighbors():
+    m = research._page_meta(total=25, max_results=10, page=1)
+    assert m["total_pages"] == 3
+    assert m["page"] == 1
+    assert m["prev_page"] is None
+    assert m["next_page"] == 2
+
+    m = research._page_meta(total=25, max_results=10, page=2)
+    assert m["prev_page"] == 1
+    assert m["next_page"] == 3
+
+    m = research._page_meta(total=25, max_results=10, page=3)  # last page
+    assert m["prev_page"] == 2
+    assert m["next_page"] is None
+
+
+def test_page_meta_exact_multiple_has_no_extra_page():
+    # 20 results at 10/page is exactly 2 pages, not 3.
+    assert research._page_meta(20, 10, 1)["total_pages"] == 2
+    assert research._page_meta(20, 10, 2)["next_page"] is None
+    assert research._page_meta(20, 10, 1)["next_page"] == 2
+
+
+def test_page_meta_zero_results():
+    m = research._page_meta(0, 10, 1)
+    assert m["total_pages"] == 0
+    assert m["next_page"] is None
+
+
+def test_page_meta_none_total_is_single_page():
+    m = research._page_meta(None, 10, 1)
+    assert m["total_pages"] == 0
+
+
+def test_search_page_one_starts_at_zero(monkeypatch):
+    captured = {}
+    def fake(q, max_results, field, sort, start=0):
+        captured["start"] = start
+        return ([_paper()], 100)
+    monkeypatch.setattr(research, "search_arxiv_live", fake)
+    research.search("transformer", max_results=12, page=1)
+    assert captured["start"] == 0
+
+
+def test_search_page_two_starts_at_page_size(monkeypatch):
+    captured = {}
+    def fake(q, max_results, field, sort, start=0):
+        captured["start"] = start
+        return ([_paper()], 100)
+    monkeypatch.setattr(research, "search_arxiv_live", fake)
+    research.search("transformer", max_results=12, page=2)
+    assert captured["start"] == 12  # (2-1)*12
+
+
+def test_search_page_beyond_end_is_honest_not_fallback(monkeypatch):
+    # A live query that pages past the end returns empty papers but still the
+    # true total — source stays "arxiv" (a real answer), not a cache fallback.
+    monkeypatch.setattr(research, "search_arxiv_live", lambda *a, **k: ([], 12))
+    r = research.search("transformer", max_results=12, page=2)
+    assert r["source"] == "arxiv"
+    assert r["total_results"] == 12
+    assert r["papers"] == []
+    assert r["page"] == 2
+    assert "No matches" in r["message"]
+
+
+def test_search_returns_page_metadata_on_live(monkeypatch):
+    monkeypatch.setattr(research, "search_arxiv_live",
+                        lambda *a, **k: ([_paper()], 37))
+    r = research.search("transformer", max_results=10, page=1)
+    assert r["page"] == 1
+    assert r["per_page"] == 10
+    assert r["total_pages"] == 4  # ceil(37/10)
+    assert r["next_page"] == 2
+    assert r["prev_page"] is None
+
+
+def test_search_clamps_negative_and_zero_page_to_one(monkeypatch):
+    captured = {}
+    def fake(q, max_results, field, sort, start=0):
+        captured["start"] = start
+        return ([_paper()], 10)
+    monkeypatch.setattr(research, "search_arxiv_live", fake)
+    research.search("transformer", max_results=10, page=0)
+    assert captured["start"] == 0
+    research.search("transformer", max_results=10, page=-5)
+    assert captured["start"] == 0
+
+
+def test_search_fallback_reports_single_page(monkeypatch):
+    monkeypatch.setattr(research, "search_arxiv_live",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("down")))
+    monkeypatch.setattr(research, "get_research_digest", lambda: {"papers": [_paper()]})
+    r = research.search("transformer", max_results=10, page=3)
+    assert r["source"] == "cache"
+    assert r["page"] == 1  # cache digest has no real pages
+    assert r["total_pages"] == 1
+    assert r["next_page"] is None
+    assert r["prev_page"] is None
+
+
+def test_api_research_search_passes_page(client, monkeypatch):
+    captured = {}
+    def fake(q, max_results, field, sort, start=0):
+        captured["start"] = start
+        return ([_paper()], 100)
+    monkeypatch.setattr(research, "search_arxiv_live", fake)
+    r = client.get("/api/research/search?q=transformer&max=10&page=3")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j["source"] == "arxiv"
+    assert j["page"] == 3
+    assert j["total_pages"] == 10  # ceil(100/10)
+    assert j["prev_page"] == 2
+    assert j["next_page"] == 4
+    assert captured["start"] == 20  # (3-1)*10
+
+
+def test_api_research_search_non_int_page_defaults(client, monkeypatch):
+    monkeypatch.setattr(research, "search_arxiv_live",
+                        lambda *a, **k: ([_paper()], 1))
+    r = client.get("/api/research/search?q=transformer&page=abc")
+    assert r.status_code == 200
+    assert r.get_json()["page"] == 1
+    r2 = client.get("/api/research/search?q=transformer&page=-2")
+    assert r2.status_code == 200
+    assert r2.get_json()["page"] == 1
+
+
+def test_research_page_has_pager_markup(client, monkeypatch):
+    # The page must expose the pager container (contract with the JS).
+    monkeypatch.setattr(research, "get_research_digest",
+                        lambda: {"cached_at": "2026-01-01T00:00:00+00:00",
+                                 "papers": [], "total": 0, "stale": False,
+                                 "categories": {}, "new_papers": [], "new_count": 0,
+                                 "new_id_list": [], "current_ids": []})
+    html = client.get("/research").get_data(as_text=True)
+    assert 'id="arxiv-pager"' in html
