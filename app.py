@@ -977,6 +977,20 @@ def api_security():
     })
 
 
+@app.route("/api/egress")
+def api_egress():
+    """Self-check the service's outbound internet path. This box has no direct
+    egress — all outbound HTTP must go through a proxy configured in the process
+    environment. If those env vars are missing, the internet-facing features
+    (live arXiv search) do NOT error; they silently degrade to a cache fallback.
+    This endpoint probes the same urllib path and reports reachability as data,
+    with a pointed error when the proxy is missing, so that silent-degradation
+    regression is caught here instead of discovered by a visitor seeing stale
+    results. Read-only, no side effects."""
+    from research import check_egress
+    return jsonify(check_egress())
+
+
 @app.route("/csp-report", methods=["POST"])
 def csp_report():
     """CSP report-uri sink. Browsers POST a JSON violation report here when the
@@ -1008,6 +1022,10 @@ _API_CHECKS = [
     ("/api/research/search?q=ai", "papers", list, False),  # may honestly be 0 hits
     ("/api/compute/capabilities", "max_concurrent", int, True),
     ("/api/compute/history", "entries", list, False),  # may legitimately be empty
+    # Live egress probe — proves the service can actually reach the internet.
+    # This is the endpoint that turns the "features silently fall back to cache
+    # when the proxy env is missing" regression into a visible health failure.
+    ("/api/egress", "reachable", bool, True),
 ]
 
 

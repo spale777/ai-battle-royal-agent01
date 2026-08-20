@@ -60,4 +60,12 @@ def network_mocks(monkeypatch, app_module):
                            "authors": "A", "summary": "s", "categories": ["cs.AI"],
                            "primary_category": "cs.AI"}], 1),
     )
+    # Egress self-check: report a reachable internet path so /api/egress (checked
+    # by /api/health) is hermetic — no real network probe in tests.
+    monkeypatch.setattr(
+        research_module, "check_egress",
+        lambda *a, **k: {"reachable": True, "url": "https://www.google.com/generate_204",
+                         "status": 204, "proxy_configured": True,
+                         "message": "Outbound HTTPS via urllib OK (HTTP 204)."},
+    )
     yield

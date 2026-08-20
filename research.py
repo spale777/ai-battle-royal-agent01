@@ -4,6 +4,7 @@ import json
 import os
 import urllib.parse
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -247,6 +248,89 @@ def search(query: str, max_results: int = 10, field: str = "all",
         "message": ("arXiv is unreachable right now — showing matches from the "
                     "cached digest (last few days, ~20 papers) instead."),
     }
+
+
+# --- Egress self-check (turns a SILENT degradation into VISIBLE data) ---------
+#
+# The live features above reach the internet with a plain urllib.request call
+# that inherits proxy settings from the process environment. When that
+# environment is missing the proxy vars (this box has NO direct egress), the
+# features don't crash — they fail to resolve names and `search()` silently
+# degrades to `source="cache"`, so a visitor sees stale results with no warning.
+# That exact failure mode (shell curl works, service silently falls back) was
+# caught in session 14 only by luck. This endpoint makes the class of bug
+# observable on demand: it probes the same urllib path and reports, with a
+# pointed error, whether the service can actually reach the internet.
+
+EGRESS_PROBE_URL = "https://www.google.com/generate_204"
+
+
+def _egress_default_probe(url: str, timeout: float):
+    """The default egress probe: a HEAD-ish GET through urllib.request, which
+    inherits proxy settings from the environment exactly like the arXiv fetchers
+    do. Kept as a separate function so tests can monkeypatch it and stay
+    hermetic. Returns the HTTP status code on success; raises on any network
+    error (URLError for DNS/proxy, HTTPError for a real non-2xx response)."""
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status
+
+
+def check_egress(probe_url: str = EGRESS_PROBE_URL, timeout: float = 5.0,
+                 fetcher=None) -> dict:
+    """Probe the service's outbound HTTP path and report reachability as data.
+
+    `fetcher` is injectable (defaults to `_egress_default_probe`) so tests run
+    hermetically. The result is JSON-safe and always carries the probe's status
+    and a `message` that points at the most likely cause when it fails —
+    specifically the proxy-missing signature (DNS failure + no proxy env vars),
+    which is the regression this box is actually prone to.
+    """
+    fetch = fetcher or _egress_default_probe
+    proxy_set = any(
+        os.environ.get(k) for k in ("http_proxy", "https_proxy", "all_proxy")
+    )
+    try:
+        status = fetch(probe_url, timeout)
+        return {
+            "reachable": True,
+            "url": probe_url,
+            "status": status,
+            "proxy_configured": proxy_set,
+            "message": f"Outbound HTTPS via urllib OK (HTTP {status}).",
+        }
+    except urllib.error.HTTPError as e:
+        # We reached a real HTTP server but it answered non-2xx — that still
+        # proves egress works (the name resolved and a proxy responded).
+        return {
+            "reachable": True,
+            "url": probe_url,
+            "status": e.code,
+            "proxy_configured": proxy_set,
+            "message": f"Outbound HTTPS OK (server responded HTTP {e.code}).",
+        }
+    except Exception as e:
+        # URLError wraps a socket.gaierror for DNS failure; the message
+        # "Temporary failure in name resolution" is the exact signature of the
+        # proxy-missing regression on this box.
+        raw = str(e)
+        is_dns = "name resolution" in raw or "getaddrinfo" in raw or "gaierror" in raw
+        if is_dns and not proxy_set:
+            message = (
+                "Name resolution failed and no proxy is configured — the "
+                "service has no direct egress, so internet features (live arXiv "
+                "search) will silently degrade to their cache fallback. Add "
+                "http_proxy/https_proxy to the service environment."
+            )
+        else:
+            message = f"Outbound HTTPS probe failed: {raw}"
+        return {
+            "reachable": False,
+            "url": probe_url,
+            "status": None,
+            "proxy_configured": proxy_set,
+            "message": message,
+        }
 
 
 def category_breakdown(papers: list[dict]) -> dict:
