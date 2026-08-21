@@ -418,6 +418,11 @@
     })();
 
     // Client-side category filter + text search over the digest (no new endpoint).
+    // The active category is mirrored into the URL (?cat=<cat>) so a filtered
+    // digest is a shareable deep link, and reloading with that param restores the
+    // filter. Same "state in the URL, reproduces itself" rule as the live search
+    // above: only the category rides in the query string — the paper data is still
+    // the server-rendered digest, and an unknown/absent cat degrades to "all".
     (function () {
         var list = document.getElementById('paper-list');
         if (!list) return;
@@ -433,6 +438,27 @@
         function setActive(chip) {
             chips.forEach(function (c) { c.classList.remove('active'); });
             if (chip) chip.classList.add('active');
+        }
+
+        function chipForCat(cat) {
+            var hit = null;
+            chips.forEach(function (c) {
+                if ((c.getAttribute('data-cat') || '').toLowerCase() === cat) hit = c;
+            });
+            return hit;
+        }
+
+        // Mirror the active category into the URL (?cat=<cat>); drop the param
+        // when there is no category filter. replaceState keeps the history stack
+        // clean — toggling filters should not add history entries.
+        function syncUrl() {
+            try {
+                var sp = new URLSearchParams(location.search);
+                if (activeCat) sp.set('cat', activeCat);
+                else sp.delete('cat');
+                var qs = sp.toString();
+                history.replaceState(null, '', '/research' + (qs ? '?' + qs : ''));
+            } catch (e) { /* noop */ }
         }
 
         function apply() {
@@ -459,26 +485,33 @@
             if (empty) empty.style.display = shown ? 'none' : 'block';
         }
 
+        // Apply a category (or null for "all") and keep the URL in step. When
+        // `fromUrl` is true we just read the URL, so don't rewrite it.
+        function setCat(cat, fromUrl) {
+            if (cat) {
+                var chip = chipForCat(cat);
+                activeCat = chip ? cat : null;      // unknown cat -> "all"
+                setActive(chip || allChip);
+            } else {
+                activeCat = null; setActive(allChip);
+            }
+            if (reset) reset.style.display = activeCat ? 'inline' : 'none';
+            if (!fromUrl) syncUrl();
+            apply();
+        }
+
         chips.forEach(function (chip) {
             chip.addEventListener('click', function () {
                 var cat = (chip.getAttribute('data-cat') || '').toLowerCase();
-                if (chip === allChip || activeCat === cat) {
-                    activeCat = null; setActive(allChip);
-                } else {
-                    activeCat = cat; setActive(chip);
-                }
-                if (reset) reset.style.display = activeCat ? 'inline' : 'none';
-                apply();
+                setCat((chip === allChip || activeCat === cat) ? null : cat);
             });
         });
-        if (reset) reset.addEventListener('click', function () {
-            activeCat = null; setActive(allChip);
-            reset.style.display = 'none'; apply();
-        });
+        if (reset) reset.addEventListener('click', function () { setCat(null); });
         if (search) search.addEventListener('input', apply);
 
-        setActive(allChip);
-        apply();
+        // Restore a category from the URL (?cat=cs.AI) on load.
+        var sp = new URLSearchParams(location.search);
+        setCat((sp.get('cat') || '').toLowerCase(), true);
     })();
 </script>
 {% endblock %}

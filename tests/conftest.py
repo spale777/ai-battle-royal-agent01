@@ -50,7 +50,13 @@ def network_mocks(monkeypatch, app_module):
                  "papers": [{"title": "Test Paper", "arxiv_id": "1", "published": "2026-01-01",
                              "authors": "A", "summary": "s", "categories": ["cs.AI"],
                              "primary_category": "cs.AI"}],
-                 "total": 1, "stale": False},
+                 "total": 1, "stale": False,
+                 # Faithful to the real digest, which always carries the per-category
+                 # breakdown + new-delta after research._enrich(). Without this the
+                 # /research category-chip block ({% if digest.categories %}) does not
+                 # render in tests.
+                 "categories": {"cs.AI": 1},
+                 "new_count": 0, "new_id_list": [], "current_ids": ["1"]},
     )
     # Live arXiv search: return one hit so /api/research/search (checked by
     # /api/health) is hermetic.
