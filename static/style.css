@@ -516,19 +516,57 @@ code {
 .compute-images {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.75rem;
     margin: 0.5rem 0;
+}
+
+.compute-figure {
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    overflow: hidden;
 }
 
 .compute-image {
     max-width: 100%;
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    display: block;
     cursor: zoom-in;
 }
 
-.compute-image:hover {
+.compute-figure-cap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.compute-figure-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.compute-dl {
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.compute-dl:hover {
+    background: var(--border);
     border-color: var(--accent);
+}
+
+.compute-dl:disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 .compute-cap-note {

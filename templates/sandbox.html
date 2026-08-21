@@ -395,7 +395,14 @@ function renderComputeResult(r) {
     if (r.images && r.images.length) {
         html += '<div class="compute-images">' +
             r.images.map(function (im, i) {
-                return '<img class="compute-image" src="' + im.data_url + '" alt="figure ' + (i+1) + '" title="Click to zoom">';
+                const n = i + 1;
+                return '<figure class="compute-figure">' +
+                    '<img class="compute-image" src="' + im.data_url + '" alt="figure ' + n + '" title="Click to zoom">' +
+                    '<figcaption class="compute-figure-cap">' +
+                        '<span class="compute-figure-meta">figure ' + n + ' · ' + fmtBytes(im.bytes) + ' PNG</span>' +
+                        '<button class="compute-dl btn-ghost" type="button" data-fidx="' + i + '" title="Download this figure as a PNG file">Download</button>' +
+                    '</figcaption>' +
+                '</figure>';
             }).join('') + '</div>';
     }
     if (r.timed_out) {
@@ -415,6 +422,35 @@ function renderComputeResult(r) {
             img.classList.toggle('zoomed');
         });
     });
+    // Download a figure: the image is already a PNG data-URL in the DOM, so this
+    // is pure client-side — no server file, no new endpoint, CSP unchanged.
+    computeOut.querySelectorAll('.compute-dl').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const idx = parseInt(btn.getAttribute('data-fidx'), 10) || 0;
+            const img = computeOut.querySelectorAll('.compute-image')[idx];
+            if (!img || !img.src) return;
+            downloadDataUrl(img.src, 'workbench-figure-' + (idx + 1) + '.png');
+            const old = btn.textContent;
+            btn.textContent = 'Saved ✓';
+            btn.disabled = true;
+            setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1600);
+        });
+    });
+}
+
+// Trigger a browser download of a data-URL (the figures we get back are already
+// data:image/png;base64,...). The <a> is created transiently, clicked, and
+// removed; a data: download does not navigate or touch a new origin, so the
+// strict CSP (img-src 'self' data:) already covers it.
+function downloadDataUrl(dataUrl, filename) {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename || 'figure.png';
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { document.body.removeChild(a); }, 0);
 }
 
 function escapeHtml(s) {

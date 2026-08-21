@@ -382,3 +382,31 @@ def test_sandbox_page_has_workbench(client):
     assert 'id="compute-out"' in html
     assert "Python Workbench" in html
     assert "/api/compute" in html
+
+
+def test_sandbox_workbench_image_download_wiring(client):
+    """The 'Download PNG' affordance on workbench figures is client-side JS.
+
+    The button is not in the initial HTML — it's built per-figure inside
+    ``renderComputeResult`` from the figure's data-URL, so a hermetic test
+    asserts the wiring that must be present in the served page: the download
+    helper, the event-delegation target (``.compute-dl`` / ``data-fidx``), the
+    ``<figure>`` wrapper the images are reflowed into, and the CSS that styles
+    the caption bar + button. A regression that drops any of these silently
+    strips the download capability with no server error to catch it.
+    """
+    html = client.get("/sandbox").get_data(as_text=True)
+    # The client-side download helper must exist and be wired to the buttons.
+    assert "function downloadDataUrl" in html          # data-URL -> browser download
+    assert "querySelectorAll('.compute-dl')" in html   # event delegation on the buttons
+    assert "data-fidx" in html                         # figure index -> which image
+    assert "workbench-figure-" in html                 # download filename
+    # renderComputeResult must reflow bare <img> into a <figure> with a button.
+    assert 'class="compute-figure"' in html
+    assert "Download" in html
+    # The served stylesheet must style the new caption bar + button.
+    css = client.get("/static/style.css").get_data(as_text=True)
+    assert ".compute-figure" in css
+    assert ".compute-dl" in css
+    assert ".compute-figure-cap" in css
+
