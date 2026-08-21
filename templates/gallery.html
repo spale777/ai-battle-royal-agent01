@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}workbench gallery — agent-01{% endblock %}
+{% block header %}workbench gallery{% endblock %}
+{% block tagline %}<p class="tagline">What the Python Workbench computes &amp; plots — real figures, one click to re-run</p>{% endblock %}
+
+{% block content %}
+<section>
+    <p class="section-desc">
+        Each figure below was produced by a short Python snippet in the
+        <a href="/sandbox">Python Workbench</a> — the same server-side sandbox
+        that runs your own code under hard resource limits, with a restricted
+        <code>plt</code> (matplotlib) that returns figures as images. The images
+        are pre-rendered, so this page loads instantly; <em>open in workbench</em>
+        drops the exact snippet into the editor and runs it live, so you can edit
+        it and watch it re-compute.
+    </p>
+    <p class="compute-cap-note gallery-count">
+        {{ count }} examples &middot; each link reproduces its snippet in the workbench
+    </p>
+</section>
+
+<section>
+    <div class="gallery-grid">
+        {% for ex in examples %}
+        <figure class="gallery-card">
+            <div class="gallery-img">
+                <img src="{{ ex.png }}" alt="{{ ex.title }}" loading="lazy"
+                     title="Click to zoom">
+            </div>
+            <figcaption class="gallery-cap">
+                <h3 class="gallery-title">{{ ex.title }}</h3>
+                <p class="gallery-desc">{{ ex.caption }}</p>
+                <div class="gallery-actions">
+                    <a class="btn-ghost gallery-open" href="{{ ex.workbench }}"
+                       target="_blank" rel="noopener">Open in workbench ↗</a>
+                    <button class="btn-ghost gallery-code-toggle" type="button"
+                            data-key="{{ ex.key }}">View code</button>
+                    <span class="gallery-meta">{{ ex.chars }} chars</span>
+                </div>
+                <pre class="gallery-code" id="gcode-{{ ex.key }}" hidden>{{ ex.code }}</pre>
+            </figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+    <p class="section-desc gallery-cta">
+        Want to try your own? <a href="/sandbox">Open the workbench</a> — safe modules
+        are pre-loaded, <code>plt.show()</code> returns your figure, and any session
+        becomes a shareable link.
+    </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Collapsible "View code" per card + click-to-zoom on the figure. Pure DOM,
+// no untrusted innerHTML, so the strict CSP needs nothing new.
+(function () {
+    var grid = document.querySelector('.gallery-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.gallery-card').forEach(function (card) {
+        var img = card.querySelector('.gallery-img img');
+        if (img) img.addEventListener('click', function () { img.classList.toggle('zoomed'); });
+        var toggle = card.querySelector('.gallery-code-toggle');
+        var code = card.querySelector('.gallery-code');
+        if (toggle && code) {
+            toggle.addEventListener('click', function () {
+                var hidden = code.hidden;
+                code.hidden = !hidden;
+                toggle.textContent = hidden ? 'Hide code' : 'View code';
+            });
+        }
+    });
+})();
+</script>
+{% endblock %}

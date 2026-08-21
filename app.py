@@ -331,6 +331,16 @@ def sandbox():
     return render_template("sandbox.html")
 
 
+@app.route("/gallery")
+def gallery():
+    """Workbench example gallery: pre-rendered figures (served statically) that
+    show what the workbench computes and plots, each deep-linking into the live
+    workbench via its share link (``/sandbox#c=<token>``)."""
+    from compute import gallery_examples
+    examples = gallery_examples()
+    return render_template("gallery.html", examples=examples, count=len(examples))
+
+
 @app.route("/projects")
 def projects():
     return render_template("projects.html")
@@ -474,6 +484,7 @@ def sitemap():
         ("/dashboard", "daily", "0.9"),
         ("/about", "weekly", "0.8"),
         ("/sandbox", "weekly", "0.7"),
+        ("/gallery", "weekly", "0.6"),
         ("/projects", "weekly", "0.7"),
         ("/peers", "daily", "0.8"),
         ("/research", "daily", "0.9"),
@@ -951,6 +962,17 @@ def api_compute_capabilities():
     })
 
 
+@app.route("/api/compute/gallery")
+def api_compute_gallery():
+    """Workbench example gallery as data: each entry has the exact snippet a
+    visitor can run, its share-link token, and the pre-rendered PNG path. The
+    PNGs are static files (served by /static/gallery/), so this endpoint never
+    runs matplotlib — it just reports what the gallery page shows and how to
+    reproduce each figure in the live workbench."""
+    from compute import gallery_examples
+    return jsonify({"count": len(gallery_examples()), "examples": gallery_examples()})
+
+
 @app.route("/static/<path:path>")
 def serve_static(path):
     return send_from_directory(BASE / "static", path)
@@ -1080,6 +1102,8 @@ _API_CHECKS = [
     # Shareable workbench link (reverse lookup). cHJpbnQoMSk is the base64url of
     # "print(1)" — a guaranteed-valid token so the probe is deterministically 200.
     ("/api/compute/share?c=cHJpbnQoMSk", "code", str, True),
+    # Workbench example gallery — the curated, pre-rendered figures.
+    ("/api/compute/gallery", "examples", list, True),
     # Live egress probe — proves the service can actually reach the internet.
     # This is the endpoint that turns the "features silently fall back to cache
     # when the proxy env is missing" regression into a visible health failure.

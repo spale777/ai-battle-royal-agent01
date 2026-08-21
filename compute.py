@@ -203,6 +203,13 @@ def _axes(fig=None):
     return _plt_figures[-1][1]
 
 
+def _axis(*args, **kwargs):
+    # ax.axis: "equal" (square aspect, e.g. for pie charts), "off", or a
+    # [xmin, xmax, ymin, ymax] limits list. Safe — only sets axis properties.
+    if _plt_figures:
+        return _plt_figures[-1][1].axis(*args, **kwargs)
+
+
 def _set_title(text, *args, **kwargs):
     if _plt_figures:
         return _plt_figures[-1][1].set_title(text, *args, **kwargs)
@@ -233,9 +240,12 @@ def _grid(visible=True, *args, **kwargs):
         return _plt_figures[-1][1].grid(visible, *args, **kwargs)
 
 
-def _legend(labels=None, **kwargs):
+def _legend(*args, **kwargs):
+    # Forward to ax.legend: no-arg (use existing labels), (labels,), or kwargs
+    # like loc/. The old form always injected labels=None positionally, which
+    # broke the common no-arg plt.legend() call.
     if _plt_figures:
-        return _plt_figures[-1][1].legend(labels, **kwargs)
+        return _plt_figures[-1][1].legend(*args, **kwargs)
 
 
 def _savefig(*args, **kwargs):
@@ -277,6 +287,7 @@ plt.boxplot = _boxplot
 plt.stem = _stem
 plt.figure = _figure
 plt.axes = _axes
+plt.axis = _axis
 plt.title = _set_title
 plt.xlabel = _set_xlabel
 plt.ylabel = _set_ylabel
@@ -355,6 +366,211 @@ def _child_env():
         "MPLCONFIGDIR": _MPLCONFIG_DIR,
     })
     return env
+
+
+# --- Gallery of worked workbench examples (pre-rendered, deterministic) ------
+# Curated snippets that show what the workbench can compute AND plot. The PNGs
+# are rendered ONCE by scripts/make_gallery.py (committed under static/gallery/),
+# so /gallery is instant and matplotlib never runs inside a web request. Each
+# entry's ``code`` is the exact snippet a visitor runs in the workbench, and
+# ``token`` is its share-link fragment, so "open in workbench" reproduces it.
+#
+# Determinism matters: every snippet either avoids randomness or fixes
+# random.seed(...), so a re-render of the gallery is byte-stable and the
+# committed PNG always matches the snippet shown.
+GALLERY_EXAMPLES = [
+    {
+        "key": "sine",
+        "title": "Sine wave",
+        "caption": "Sample a sine curve at 0.1-radian steps and plot it. "
+                   "The workbench computes the data in plain Python — no numpy.",
+        "code": (
+            "xs = [x / 10 for x in range(-60, 61)]\n"
+            "ys = [math.sin(x) for x in xs]\n"
+            "plt.plot(xs, ys, color=\"tab:blue\", linewidth=2)\n"
+            "plt.title('sin(x) for x in [-6, 6]'); plt.xlabel('x'); plt.ylabel('sin x')\n"
+            "plt.grid(True, alpha=0.3)\n"
+            "plt.show()\n"
+            "print('samples:', len(xs), '· min', min(ys), 'max', max(ys))"
+        ),
+    },
+    {
+        "key": "primes",
+        "title": "Prime density",
+        "caption": "Count primes in each 100-number bucket from 1 to 1000. "
+                   "A classic sieve, plotted as a bar chart.",
+        "code": (
+            "def is_prime(n):\n"
+            "    if n < 2: return False\n"
+            "    for d in range(2, int(math.sqrt(n)) + 1):\n"
+            "        if n % d == 0: return False\n"
+            "    return True\n"
+            "buckets = [sum(1 for n in range(lo, hi + 1) if is_prime(n))\n"
+            "           for lo, hi in [(i, i + 99) for i in range(1, 1001, 100)]]\n"
+            "labels = ['1–100', '101–200', '201–300', '301–400', '401–500',\n"
+            "          '501–600', '601–700', '701–800', '801–900', '901–1000']\n"
+            "plt.bar(range(len(buckets)), buckets, color=\"tab:orange\")\n"
+            "plt.xticks(range(len(buckets)), labels, rotation=45, ha='right')\n"
+            "plt.title('Primes per 100, from 1 to 1000'); plt.ylabel('count')\n"
+            "plt.grid(True, axis='y', alpha=0.3)\n"
+            "plt.show()\n"
+            "print('total primes:', sum(buckets))"
+        ),
+    },
+    {
+        "key": "boxplot",
+        "title": "Box plot of three samples",
+        "caption": "Three Gaussian samples (fixed seed) compared as a box plot. "
+                   "Randomness is seeded, so the figure is identical every render.",
+        "code": (
+            "random.seed(42)\n"
+            "g = [random.gauss(50, 10) for _ in range(40)]\n"
+            "h = [random.gauss(62, 8) for _ in range(40)]\n"
+            "j = [random.gauss(55, 16) for _ in range(40)]\n"
+            "plt.boxplot([g, h, j], tick_labels=['A', 'B', 'C'])\n"
+            "plt.title('Three Gaussian samples (seed 42)'); plt.ylabel('value')\n"
+            "plt.grid(True, axis='y', alpha=0.3)\n"
+            "plt.show()\n"
+            "print('means:', round(statistics.mean(g), 1),\n"
+            "      round(statistics.mean(h), 1), round(statistics.mean(j), 1))"
+        ),
+    },
+    {
+        "key": "pie",
+        "title": "Proportions",
+        "caption": "A pie chart of four fixed proportions. Plain lists in, a "
+                   "labelled figure out.",
+        "code": (
+            "sizes = [42, 27, 18, 13]\n"
+            "labels = ['alpha', 'beta', 'gamma', 'other']\n"
+            "plt.pie(sizes, labels=labels, autopct='%1.0f%%',\n"
+            "        colors=['tab:blue', 'tab:orange', 'tab:green', 'tab:red'])\n"
+            "plt.title('Share of the whole')\n"
+            "plt.axis('equal')\n"
+            "plt.show()\n"
+            "print('total:', sum(sizes))"
+        ),
+    },
+    {
+        "key": "fibonacci",
+        "title": "Fibonacci spiral",
+        "caption": "Walk outward by successive Fibonacci numbers, turning 90° "
+                   "each step, and trace the spiral.",
+        "code": (
+            "a, b = 0, 1\n"
+            "xs = [0]; ys = [0]\n"
+            "for _ in range(30):\n"
+            "    a, b = b, a + b\n"
+            "    ang = math.radians(90 * (len(xs) % 4))\n"
+            "    xs.append(xs[-1] + b * math.cos(ang))\n"
+            "    ys.append(ys[-1] + b * math.sin(ang))\n"
+            "plt.plot(xs, ys, marker='o', color='tab:purple')\n"
+            "plt.title('Fibonacci spiral (first 30 terms)')\n"
+            "plt.grid(True, alpha=0.3)\n"
+            "plt.show()\n"
+            "print('last Fibonacci value:', b)"
+        ),
+    },
+    {
+        "key": "scatter",
+        "title": "Clustered scatter",
+        "caption": "Two seeded Gaussian blobs in one scatter, colored per cluster. "
+                   "One plotting call, one figure — the workbench's real model.",
+        "code": (
+            "random.seed(7)\n"
+            "a = [(random.gauss(3, 1.2), random.gauss(4, 1.2)) for _ in range(60)]\n"
+            "c = [(random.gauss(7, 1.2), random.gauss(6, 1.2)) for _ in range(60)]\n"
+            "pts = a + c\n"
+            "xs = [p[0] for p in pts]; ys = [p[1] for p in pts]\n"
+            "cols = ['tab:blue'] * len(a) + ['tab:red'] * len(c)\n"
+            "plt.scatter(xs, ys, c=cols, s=40, alpha=0.6)\n"
+            "plt.title('Two Gaussian blobs (seed 7)'); plt.xlabel('x'); plt.ylabel('y')\n"
+            "plt.grid(True, alpha=0.3)\n"
+            "plt.show()\n"
+            "print('points:', len(pts), '(60 blue + 60 red)')"
+        ),
+    },
+]
+
+# The safe stdlib the sandbox exposes to a snippet, reused here so a gallery
+# snippet renders with exactly the modules the workbench gives it.
+_GALLERY_MODULES = [
+    "math", "random", "statistics", "collections", "itertools", "string",
+    "textwrap", "fractions", "decimal", "functools", "json", "re",
+]
+
+
+def render_gallery_png(code, dpi=FIG_DPI, figsize=(16.0, 12.0)):
+    """Render a workbench-style snippet to PNG bytes on the non-interactive Agg
+    backend. Used by ``scripts/make_gallery.py`` so the committed gallery PNGs
+    match their snippets exactly. It is *not* called from a web request — the
+    PNGs are pre-rendered and served statically, so matplotlib never runs inside
+    the app. Runs only curated, deterministic, self-authored snippets.
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from matplotlib import rcParams
+    rcParams["figure.dpi"] = dpi
+
+    fig = Figure(figsize=figsize)
+    ax = fig.add_subplot(111)
+
+    class _Plt:
+        """Minimal single-axes plotting shim matching the sandbox's ``plt``."""
+        def plot(self, *a, **k): return ax.plot(*a, **k)
+        def scatter(self, x, y, *a, **k): return ax.scatter(x, y, *a, **k)
+        def bar(self, x, h, *a, **k): return ax.bar(x, h, *a, **k)
+        def hist(self, d, bins=10, *a, **k): return ax.hist(d, bins=bins, *a, **k)
+        def pie(self, x, *a, **k): return ax.pie(x, *a, **k)
+        def boxplot(self, x, *a, **k): return ax.boxplot(x, *a, **k)
+        def stem(self, x, y=None, *a, **k): return ax.stem(x, y, *a, **k)
+        def title(self, *a, **k): return ax.set_title(*a, **k)
+        def xlabel(self, *a, **k): return ax.set_xlabel(*a, **k)
+        def ylabel(self, *a, **k): return ax.set_ylabel(*a, **k)
+        def xticks(self, *a, **k): return ax.set_xticks(*a, **k)
+        def yticks(self, *a, **k): return ax.set_yticks(*a, **k)
+        def grid(self, *a, **k): return ax.grid(*a, **k)
+        def legend(self, *a, **k): return ax.legend(*a, **k)
+        def axis(self, *a, **k): return ax.axis(*a, **k)
+        def savefig(self, *a, **k):
+            raise PermissionError("plt.savefig is not available; use plt.show().")
+        def show(self, *a, **k):
+            # No-op here: the figure is saved after the snippet returns. Kept so
+            # gallery snippets are identical to what a visitor runs in the sandbox.
+            return [0]
+
+    ns = {"plt": _Plt(), "print": print}
+    for name in _GALLERY_MODULES:
+        ns[name] = __import__(name)
+    exec(compile(code, "<gallery>", "exec"), ns)
+
+    out = io.BytesIO()
+    fig.savefig(out, format="png", bbox_inches="tight")
+    return out.getvalue()
+
+
+def gallery_examples():
+    """The workbench gallery as data: metadata + the snippet's share-link token
+    + the static PNG path. Pure and deterministic — no matplotlib, no file I/O,
+    so it's cheap to call per request and trivial to test. The PNGs themselves
+    live under static/gallery/ and are served by the normal static handler.
+    """
+    out = []
+    for ex in GALLERY_EXAMPLES:
+        token = encode_share(ex["code"])
+        out.append({
+            "key": ex["key"],
+            "title": ex["title"],
+            "caption": ex["caption"],
+            "code": ex["code"],
+            "token": token,
+            "chars": len(ex["code"].strip()),
+            "png": "/static/gallery/%s.png" % ex["key"],
+            "workbench": "/sandbox#c=" + (token or ""),
+        })
+    return out
 
 
 def encode_share(code):
