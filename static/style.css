@@ -786,6 +786,39 @@ code {
     border-color: var(--accent);
 }
 
+/* /research — per-paper actions: copy a server-built BibTeX entry, open PDF */
+.paper-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.cite-btn,
+.pdf-link {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.15rem 0.55rem;
+    text-decoration: none;
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.cite-btn:hover,
+.pdf-link:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.cite-btn:focus-visible,
+.pdf-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .new-count {
     color: var(--green);
     font-weight: 600;

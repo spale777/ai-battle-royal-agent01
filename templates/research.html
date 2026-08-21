@@ -81,6 +81,12 @@
                 <span class="paper-authors">{{ paper.authors }}</span>
             </div>
             <p class="paper-summary">{{ paper.summary }}</p>
+            <div class="paper-actions">
+                <button type="button" class="cite-btn" data-bibtex="{{ paper.bibtex }}"
+                        title="Copy a BibTeX entry for this paper">BibTeX</button>
+                <a class="pdf-link" href="https://arxiv.org/pdf/{{ paper.arxiv_id }}"
+                   target="_blank" rel="noopener" title="Open the PDF on arXiv">PDF</a>
+            </div>
             <div class="paper-cats">
                 {% for cat in paper.categories[:4] %}
                 <span class="cat-tag {% if cat == paper.primary_category %}primary{% endif %}">{{ cat }}</span>
@@ -185,6 +191,24 @@
                     sum.textContent = p.summary;
                     card.appendChild(sum);
                 }
+                // Actions: copy a server-built BibTeX entry, open the PDF.
+                var actions = document.createElement('div');
+                actions.className = 'paper-actions';
+                var citeBtn = document.createElement('button');
+                citeBtn.type = 'button';
+                citeBtn.className = 'cite-btn';
+                citeBtn.textContent = 'BibTeX';
+                citeBtn.title = 'Copy a BibTeX entry for this paper';
+                citeBtn.setAttribute('data-bibtex', p.bibtex || '');
+                actions.appendChild(citeBtn);
+                var pdf = document.createElement('a');
+                pdf.className = 'pdf-link';
+                pdf.href = 'https://arxiv.org/pdf/' + p.arxiv_id;
+                pdf.target = '_blank';
+                pdf.rel = 'noopener';
+                pdf.textContent = 'PDF';
+                actions.appendChild(pdf);
+                card.appendChild(actions);
                 if (p.categories && p.categories.length) {
                     var cats = document.createElement('div');
                     cats.className = 'paper-cats';
@@ -344,6 +368,53 @@
             var p = parseInt(sp.get('page'), 10); if (!p || p < 1) p = 1;
             doSearch(p);
         })();
+    })();
+
+    // Copy a paper's BibTeX entry to the clipboard. The BibTeX string comes from
+    // the server (research.bibtex) and is read off the button's data-bibtex
+    // attribute — never re-implemented in JS, so what you copy is exactly what
+    // the API returns. Works for both the server-rendered digest and the
+    // JS-built live-search cards via event delegation on the page.
+    (function () {
+        function copyText(text, ok) {
+            function done(success) {
+                ok(success);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () { done(true); },
+                                                         function () { done(false); });
+            } else {
+                // Non-secure-context fallback: temp input + execCommand.
+                var inp = document.createElement('textarea');
+                inp.value = text;
+                inp.setAttribute('readonly', '');
+                inp.style.position = 'absolute';
+                inp.style.left = '-9999px';
+                document.body.appendChild(inp);
+                inp.select();
+                var success = false;
+                try { success = document.execCommand('copy'); } catch (e) {}
+                document.body.removeChild(inp);
+                done(success);
+            }
+        }
+        document.addEventListener('click', function (e) {
+            var btn = e.target && e.target.closest ? e.target.closest('.cite-btn') : null;
+            if (!btn) return;
+            var bibtexText = btn.getAttribute('data-bibtex') || '';
+            if (!bibtexText) return;
+            var original = btn.textContent;
+            copyText(bibtexText, function (ok) {
+                if (ok) {
+                    btn.textContent = 'Copied ✓';
+                    setTimeout(function () { btn.textContent = original; }, 1500);
+                } else {
+                    // Clipboard blocked — surface the entry in a prompt so it's
+                    // still recoverable (honest fallback, not a silent no-op).
+                    window.prompt('Copy this BibTeX entry:', bibtexText);
+                }
+            });
+        });
     })();
 
     // Client-side category filter + text search over the digest (no new endpoint).

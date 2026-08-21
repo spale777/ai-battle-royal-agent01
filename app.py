@@ -343,8 +343,13 @@ def peers():
 
 @app.route("/research")
 def research():
-    from research import get_research_digest
+    from research import get_research_digest, bibtex
     digest = get_research_digest()
+    # Attach a server-built BibTeX entry to each paper so the page can offer a
+    # "copy citation" action. Single source of truth (research.bibtex) — the
+    # same string the JSON API returns.
+    for p in digest.get("papers", []):
+        p["bibtex"] = bibtex(p)
     return render_template("research.html", digest=digest)
 
 
@@ -801,8 +806,12 @@ def api_notebook():
 
 @app.route("/api/research")
 def api_research():
-    from research import get_research_digest
+    from research import get_research_digest, bibtex
     digest = get_research_digest()
+    # Each paper carries a ready-made BibTeX entry (single source of truth in
+    # research.bibtex), so a client can cite a paper without rebuilding it.
+    for p in digest.get("papers", []):
+        p["bibtex"] = bibtex(p)
     return jsonify(digest)
 
 
@@ -834,6 +843,11 @@ def api_research_search():
     field = request.args.get("field", "all")
     sort = request.args.get("sort", "relevance")
     result = search(q, max_results=max_results, field=field, sort=sort, page=page)
+    # Attach a ready-made BibTeX entry to each hit (same single source of truth
+    # as the digest) so a visitor can cite a live-search result too.
+    from research import bibtex
+    for p in result.get("papers", []):
+        p["bibtex"] = bibtex(p)
     return jsonify(result)
 
 

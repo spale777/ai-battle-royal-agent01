@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -64,12 +65,73 @@ def _parse_entries(root) -> list[dict]:
             "arxiv_id": arxiv_id,
             "published": published,
             "authors": authors,
+            "author_names": list(author_names),  # full, untruncated — for BibTeX
             "summary": summary,
             "categories": cats[:5],
             "primary_category": primary_cat,
         })
 
     return papers
+
+
+def _bibtex_key(paper: dict) -> str:
+    """A stable BibTeX citation key: first author's surname + year + first word
+    of the title. Deterministic and pure (no network)."""
+    names = paper.get("author_names") or []
+    # First author's surname (last token of their name); fall back to id.
+    if names:
+        first = names[0].strip().split()
+        surname = (first[-1] if first else "anon")
+    else:
+        surname = (paper.get("authors") or "anon").strip().split()[-1] or "anon"
+    surname = surname[0].upper() + surname[1:].lower()
+    year = (paper.get("published") or "").split("-")
+    year = year[0] if year and year[0].isdigit() else "n.d."
+    # First meaningful word of the title (drop leading stopwords / punctuation).
+    title_words = [w for w in (paper.get("title") or "").replace(",", " ").split()
+                   if w and w[0].isalnum()]
+    word = title_words[0].lower() if title_words else "paper"
+    # Collapse to ascii alnum for a clean key.
+    word = re.sub(r"[^a-z0-9]", "", word) or "paper"
+    return f"{surname}{year}{word}"
+
+
+def bibtex(paper: dict) -> str:
+    """Build a BibTeX @article entry for an arXiv paper, server-side.
+
+    This is the SINGLE SOURCE OF TRUTH for a paper's citation: the digest page,
+    the live-search results, and the JSON API all call this, so what a visitor
+    copies is exactly what the API returns — no client-side re-implementation
+    that could drift from the data. Pure and deterministic (no network, no
+    state); a malformed/missing field degrades to a placeholder, never an error.
+    Only well-known, machine-verifiable fields are used (id, title, authors,
+    year, arXiv URL) — no invented data.
+    """
+    pid = (paper.get("arxiv_id") or "unknown").strip()
+    title = (paper.get("title") or "(untitled)").strip().replace("\n", " ")
+    # Join the full author list; fall back to the (truncated) display string.
+    names = paper.get("author_names") or []
+    author_field = " and ".join(n.strip() for n in names if n.strip())
+    if not author_field:
+        author_field = (paper.get("authors") or "").strip() or "Unknown"
+    year = (paper.get("published") or "").split("-")
+    year = year[0] if year and year[0].isdigit() else "n.d."
+    key = _bibtex_key(paper)
+    primary = (paper.get("primary_category") or "").strip()
+    note = f" arXiv preprint, arXiv:{pid}" + (f" ({primary})" if primary else "")
+    return (
+        "@article{" + key + ",\n"
+        "  title         = {" + title + "},\n"
+        "  author        = {" + author_field + "},\n"
+        "  year          = {" + year + "},\n"
+        "  eprint        = {" + pid + "},\n"
+        "  archivePrefix = {arXiv},\n"
+        "  primaryClass  = {" + (primary or "n/a") + "},\n"
+        "  doi           = {10.48550/arXiv." + pid + "},\n"
+        "  url           = {https://arxiv.org/abs/" + pid + "},\n"
+        "  note          = {" + note + "}\n"
+        "}\n"
+    )
 
 
 def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
