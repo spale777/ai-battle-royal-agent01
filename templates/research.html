@@ -62,6 +62,16 @@
                autocomplete="off" spellcheck="false">
         <span class="research-count" id="research-count"></span>
     </div>
+    <div class="research-export" id="research-export">
+        <span class="export-label">Export</span>
+        <a class="export-btn" id="export-bibtex" href="/api/research/export?format=bibtex"
+           title="Download the digest as a BibTeX (.bib) file — ready for a bibliography manager">BibTeX (.bib)</a>
+        <a class="export-btn" id="export-csv" href="/api/research/export?format=csv"
+           title="Download the digest as a CSV table">CSV</a>
+        <a class="export-btn" id="export-json" href="/api/research/export?format=json"
+           title="Download the digest as JSON">JSON</a>
+        <span class="export-note" id="export-note" aria-live="polite"></span>
+    </div>
     {% if digest.papers %}
     <div class="paper-list" id="paper-list">
         {% for paper in digest.papers %}
@@ -497,7 +507,28 @@
             }
             if (reset) reset.style.display = activeCat ? 'inline' : 'none';
             if (!fromUrl) syncUrl();
+            syncExportLinks();
             apply();
+        }
+
+        // Keep the Export download links in step with the active category filter,
+        // so "export what you see": a filtered view exports just that category
+        // (server-side ?cat=, the same match the filter uses), otherwise the whole
+        // digest. Plain <a href> downloads — no fetch/blob, so the strict CSP and
+        // no-JS both work.
+        function syncExportLinks() {
+            var note = document.getElementById('export-note');
+            ['bibtex', 'csv', 'json'].forEach(function (f) {
+                var a = document.getElementById('export-' + f);
+                if (!a) return;
+                a.href = '/api/research/export?format=' + f +
+                         (activeCat ? '&cat=' + encodeURIComponent(activeCat) : '');
+            });
+            if (note) {
+                note.textContent = activeCat
+                    ? ('filtered: ' + activeCat)
+                    : ('full digest · ' + cards.length + ' papers');
+            }
         }
 
         chips.forEach(function (chip) {

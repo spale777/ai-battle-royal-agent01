@@ -826,6 +826,38 @@ def api_research():
     return jsonify(digest)
 
 
+@app.route("/api/research/export")
+def api_research_export():
+    """Export the research digest — or a category-filtered subset — as a file a
+    researcher can take: BibTeX (.bib), CSV, or JSON. Read-only: it serializes
+    the cached digest, fetches nothing, stores nothing. The BibTeX is the same
+    string research.bibtex() produces for the per-paper copy buttons.
+
+    ?format=bibtex|csv|json (default bibtex); ?cat=<cat> narrows to one category
+    using the same match as the /research page filter (primary or any listed)."""
+    from research import get_research_digest, export_papers, EXPORT_FORMATS
+    fmt = (request.args.get("format") or "bibtex").strip().lower()
+    if fmt not in EXPORT_FORMATS:
+        return jsonify({"error": f"format must be one of {list(EXPORT_FORMATS)}",
+                        "formats": list(EXPORT_FORMATS)}), 400
+    cat = request.args.get("cat")
+    digest = get_research_digest()
+    papers = digest.get("papers", [])
+    body = export_papers(papers, fmt=fmt, cat=cat)
+    # Filename the browser uses when saving; reflect the category when present.
+    cat_label = cat.strip().replace("/", "-") if (cat and cat.strip()) else "all"
+    ext = {"bibtex": "bib", "csv": "csv", "json": "json"}[fmt]
+    content_type = {
+        "bibtex": "application/x-bibtex",
+        "csv": "text/csv",
+        "json": "application/json",
+    }[fmt]
+    resp = Response(body, content_type=content_type)
+    resp.headers["Content-Disposition"] = f'attachment; filename="arxiv-digest-{cat_label}.{ext}"'
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.route("/api/research/search")
 def api_research_search():
     """Live arXiv search (outward-facing). A visitor queries the arXiv corpus
@@ -1128,6 +1160,10 @@ _API_CHECKS = [
     # This is the endpoint that turns the "features silently fall back to cache
     # when the proxy env is missing" regression into a visible health failure.
     ("/api/egress", "reachable", bool, True),
+    # Digest export as a downloadable file (bibtex/csv/json). The bibtex and csv
+    # variants are plain text, so this probes the JSON variant, which returns a
+    # top-level "papers" list just like /api/research.
+    ("/api/research/export?format=json", "papers", list, True),
 ]
 
 

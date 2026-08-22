@@ -1,5 +1,7 @@
 """Research digest — fetch and cache arXiv papers."""
 
+import csv
+import io
 import json
 import os
 import re
@@ -310,6 +312,111 @@ def search(query: str, max_results: int = 10, field: str = "all",
         "message": ("arXiv is unreachable right now — showing matches from the "
                     "cached digest (last few days, ~20 papers) instead."),
     }
+
+
+# --- Export (outward-facing: let a researcher take the digest with them) ------
+#
+# A single-paper "copy BibTeX" button already exists; this completes the loop by
+# letting a visitor export the whole digest — or the category-filtered subset —
+# in a format a researcher actually uses. It is read-only and pure: no network,
+# no state, bounded to the digest's (small) paper count, and the BibTeX output is
+# the SAME string research.bibtex() already produces for the per-paper buttons,
+# so what you download is exactly what you copy.
+
+EXPORT_FORMATS = ("bibtex", "csv", "json")
+
+_CSV_COLUMNS = [
+    "arxiv_id", "title", "published", "authors", "primary_category",
+    "categories", "url", "doi", "abstract",
+]
+
+
+def _export_url(paper: dict) -> str:
+    return "https://arxiv.org/abs/" + (paper.get("arxiv_id") or "").strip()
+
+
+def _export_doi(paper: dict) -> str:
+    pid = (paper.get("arxiv_id") or "").strip()
+    return f"10.48550/arXiv.{pid}" if pid else ""
+
+
+def export_papers(papers, fmt: str = "bibtex", cat: str | None = None) -> str:
+    """Serialize a list of papers into an export format, as text.
+
+    `papers` is the digest's paper list (the dicts produced by the parser /
+    `get_research_digest`). `fmt` is one of EXPORT_FORMATS:
+      - "bibtex" -> a .bib file: one @article per paper, from research.bibtex()
+                    (the single source of truth shared with the per-paper copy
+                    buttons). Blank line between entries.
+      - "csv"    -> one row per paper, RFC-4180 quoting, fixed column order.
+      - "json"   -> a stable, JSON-safe object: {exported_at, count, format,
+                    papers:[...]} with a curated field set (no internal keys).
+    `cat` optionally narrows to papers whose primary_category (case-insensitive)
+    or any listed category equals it — the same match the /research page filter
+    uses, so an export of a filtered view matches what the visitor sees. An
+    unknown/empty `cat` returns all papers.
+
+    Pure and deterministic (no network, no clock for bibtex/csv; the json
+    `exported_at` is the only time-dependent field and is injected by the caller
+    so the function itself stays testable). Never raises on a malformed paper —
+    missing fields degrade to empty strings.
+    """
+    fmt = (fmt or "").strip().lower()
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError(f"format must be one of {list(EXPORT_FORMATS)}, got {fmt!r}")
+
+    if cat:
+        cat = cat.strip().lower()
+        if cat:
+            papers = [
+                p for p in papers
+                if (p.get("primary_category") or "").lower() == cat
+                or any((c or "").lower() == cat for c in p.get("categories", []))
+            ]
+
+    if fmt == "bibtex":
+        # research.bibtex is the single source of truth — the same string the
+        # per-paper "copy citation" button uses.
+        return "\n".join(bibtex(p) for p in papers)
+
+    if fmt == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        for p in papers:
+            writer.writerow({
+                "arxiv_id": (p.get("arxiv_id") or "").strip(),
+                "title": (p.get("title") or "").strip(),
+                "published": (p.get("published") or "").strip(),
+                "authors": (p.get("authors") or "").strip(),
+                "primary_category": (p.get("primary_category") or "").strip(),
+                "categories": " ".join(p.get("categories", [])),
+                "url": _export_url(p),
+                "doi": _export_doi(p),
+                "abstract": (p.get("summary") or "").strip().replace("\n", " "),
+            })
+        return buf.getvalue()
+
+    # json
+    items = [
+        {
+            "arxiv_id": (p.get("arxiv_id") or "").strip(),
+            "title": (p.get("title") or "").strip(),
+            "published": (p.get("published") or "").strip(),
+            "authors": (p.get("authors") or "").strip(),
+            "author_names": list(p.get("author_names", [])),
+            "primary_category": (p.get("primary_category") or "").strip(),
+            "categories": list(p.get("categories", [])),
+            "url": _export_url(p),
+            "doi": _export_doi(p),
+            "abstract": (p.get("summary") or "").strip(),
+        }
+        for p in papers
+    ]
+    return json.dumps(
+        {"count": len(items), "format": "json", "papers": items},
+        indent=2, ensure_ascii=False,
+    )
 
 
 # --- Egress self-check (turns a SILENT degradation into VISIBLE data) ---------

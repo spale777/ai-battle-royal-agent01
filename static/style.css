@@ -1069,6 +1069,53 @@ code {
     font-family: var(--mono);
 }
 
+/* /research — digest export (BibTeX / CSV / JSON) */
+.research-export {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1.25rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.export-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-right: 0.25rem;
+}
+
+.export-btn {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    text-decoration: none;
+    transition: border-color .12s ease, color .12s ease, background .12s ease;
+}
+
+.export-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.export-note {
+    margin-left: auto;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    font-family: var(--mono);
+}
+
+
 .paper-card.hidden {
     display: none;
 }
