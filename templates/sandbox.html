@@ -35,7 +35,7 @@
 
 <section>
     <h2>Python Workbench</h2>
-    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples.</p>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images, or <code>show(value)</code> to surface a number, list, or table of rows so the result renders as a table. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples.</p>
     <div class="compute-examples" id="compute-examples"></div>
     <div class="compute-wrap">
         <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
@@ -70,7 +70,10 @@ plt.plot(xs, ys); plt.show()  # returns an image">print(sum(range(1, 101)))</tex
         separate process &mdash; a runaway or memory bomb is killed, it never touches this web
         server. This is an exploration sandbox, not a security boundary.
         <code>plt.savefig</code> is unavailable; figures come back as images via
-        <code>plt.show()</code>.
+        <code>plt.show()</code>. <code>show(value)</code> returns a computed value
+        (number, list, or table of rows) as a structured result; it is bounded and
+        degrades anything unrepresentable to a short <code>repr</code> &mdash; it
+        never reads a file.
     </div>
 </section>
 
@@ -388,10 +391,89 @@ function fmtBytes(n) {
     return v.toFixed(i ? 1 : 0) + ' ' + u[i];
 }
 
+// --- Structured results: render the values a snippet surfaced via show(value) ---
+// The server already bounds + JSON-serializes these, so the page only has to
+// decide a shape per value and build a table / card. Every cell is emitted with
+// escapeHtml (no innerHTML of raw data), so the strict CSP needs no change.
+function _isObjArray(a) {
+    // a table of rows: non-empty array of equal-length arrays
+    return a.length > 0 && a.every(x => Array.isArray(x)) && a.every(x => x.length === a[0].length);
+}
+
+function _cellText(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'string') return v;
+    return String(v);
+}
+
+function renderResultValue(v) {
+    // object array -> data table (columns = row length);
+    // object -> key/value table;
+    // array of scalars -> column table;
+    // scalar / otherwise -> card.
+    if (Array.isArray(v)) {
+        if (_isObjArray(v)) {
+            let t = '<table class="compute-table"><tbody>';
+            v.forEach(row => {
+                t += '<tr>' + row.map(c => '<td>' + escapeHtml(_cellText(c)) + '</td>').join('') + '</tr>';
+            });
+            t += '</tbody></table>';
+            return '<div class="compute-result-table">' + t + '</div>';
+        }
+        if (v.length) {
+            let t = '<table class="compute-table"><tbody>';
+            v.forEach((x, i) => {
+                t += '<tr><td class="compute-idx">' + i + '</td><td>' + escapeHtml(_cellText(x)) + '</td></tr>';
+            });
+            t += '</tbody></table>';
+            return '<div class="compute-result-table">' + t + '</div>';
+        }
+        return '<div class="compute-result-card"><code></code></div>';
+    }
+    if (v && typeof v === 'object') {
+        const keys = Object.keys(v);
+        let t = '<table class="compute-table"><tbody>';
+        t += '<tr><th>key</th><th>value</th></tr>';
+        keys.forEach(k => {
+            const val = v[k];
+            const disp = (val && typeof val === 'object') ? JSON.stringify(val) : _cellText(val);
+            t += '<tr><td class="compute-key">' + escapeHtml(_cellText(k)) + '</td><td>' + escapeHtml(_cellText(disp)) + '</td></tr>';
+        });
+        t += '</tbody></table>';
+        return '<div class="compute-result-table">' + t + '</div>';
+    }
+    // scalar (or empty / anything else) -> card
+    let disp;
+    if (v === null || v === undefined) disp = 'null';
+    else if (typeof v === 'object') disp = JSON.stringify(v);
+    else disp = String(v);
+    return '<div class="compute-result-card"><code>' + escapeHtml(disp) + '</code></div>';
+}
+
+function renderResults(results) {
+    // Each surfaced value gets its own block with a Copy-JSON button (the
+    // serialized form is what the API returned, so what you copy == what you got).
+    let html = '<div class="compute-results">';
+    results.forEach((v, i) => {
+        html += '<div class="compute-result">' +
+            '<div class="compute-result-head">' +
+            '<span class="compute-result-meta">result ' + (i + 1) + '</span>' +
+            '<button class="compute-copy-json btn-ghost" type="button" data-ridx="' + i + '" title="Copy this result as JSON">Copy JSON</button>' +
+            '</div>' +
+            renderResultValue(v) +
+            '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
 function renderComputeResult(r) {
     let html = '';
     const out = (r.out || '').trim();
     if (out) html += '<pre class="compute-out-block">' + escapeHtml(out) + '</pre>';
+    if (r.results && r.results.length) {
+        html += renderResults(r.results);
+    }
     if (r.images && r.images.length) {
         html += '<div class="compute-images">' +
             r.images.map(function (im, i) {
@@ -436,6 +518,19 @@ function renderComputeResult(r) {
             setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1600);
         });
     });
+    // Copy a structured result as JSON: the serialized value is already in the
+    // API response, so what is copied is exactly what the workbench returned.
+    computeOut.querySelectorAll('.compute-copy-json').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const idx = parseInt(btn.getAttribute('data-ridx'), 10) || 0;
+            const val = (r.results && r.results[idx] !== undefined) ? r.results[idx] : null;
+            copyText(JSON.stringify(val));
+            const old = btn.textContent;
+            btn.textContent = 'Copied ✓';
+            btn.disabled = true;
+            setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1600);
+        });
+    });
 }
 
 // Trigger a browser download of a data-URL (the figures we get back are already
@@ -451,6 +546,30 @@ function downloadDataUrl(dataUrl, filename) {
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { document.body.removeChild(a); }, 0);
+}
+
+// Copy arbitrary text to the clipboard. Uses the async Clipboard API where it
+// is available (https/localhost) and falls back to a transient hidden textarea +
+// execCommand('copy') otherwise (plain http) — independent of the share field,
+// so copying a result never clobbers the share link.
+function copyText(text) {
+    text = String(text == null ? '' : text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+        setTimeout(function () { document.body.removeChild(ta); }, 0);
+        resolve();
+    });
 }
 
 function escapeHtml(s) {
@@ -720,6 +839,20 @@ const COMPUTE_EXAMPLES = [
               "plt.title('Fibonacci spiral (first 30)'); plt.grid(True, alpha=0.3)\n" +
               'plt.show()\n' +
               "print('last Fibonacci value:', b)"
+    },
+    {
+        label: 'Data table (show)',
+        code: '# show(value) surfaces a table of rows as a structured result\n' +
+              'rows = [[n, n * n, n * (n + 1) // 2, n % 2 == 0] for n in range(1, 11)]\n' +
+              'show(rows)'
+    },
+    {
+        label: 'Summary (show dict)',
+        code: 'random.seed(1)\n' +
+              'groups = {"A": [random.gauss(50, 8) for _ in range(50)],\n' +
+              '          "B": [random.gauss(60, 8) for _ in range(50)],\n' +
+              '          "C": [random.gauss(70, 12) for _ in range(50)]}\n' +
+              'show({k: round(statistics.mean(v), 2) for k, v in groups.items()})'
     }
 ];
 

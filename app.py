@@ -933,7 +933,9 @@ def api_compute_capabilities():
     from compute import (WALL_TIMEOUT_SECONDS, CPU_TIME_LIMIT_SECONDS,
                          MEMORY_LIMIT_BYTES, FILE_SIZE_LIMIT_BYTES,
                          MAX_PROCESSES, MAX_OUTPUT_CHARS, MAX_CONCURRENT,
-                         MAX_IMAGES, FIG_DPI)
+                         MAX_IMAGES, FIG_DPI,
+                         MAX_RESULT_DEPTH, MAX_RESULT_ITEMS, MAX_RESULT_KEYS,
+                         MAX_RESULT_CELLS, MAX_RESULT_BYTES)
     return jsonify({
         "wall_timeout_seconds": WALL_TIMEOUT_SECONDS,
         "cpu_time_limit_seconds": CPU_TIME_LIMIT_SECONDS,
@@ -958,6 +960,24 @@ def api_compute_capabilities():
             "output": "figures return as PNG data-URLs in result['images']",
             "note": "No file, network, or animation access; plt.savefig is "
                     "unavailable. Snippets still run under the same OS rlimits.",
+        },
+        "results": {
+            "enabled": True,
+            "function": "show",
+            "output": "values returned as JSON in result['results']",
+            "kinds": ["number", "string", "bool", "null", "list", "dict", "set"],
+            "limits": {
+                "max_depth": MAX_RESULT_DEPTH,
+                "max_items": MAX_RESULT_ITEMS,
+                "max_keys": MAX_RESULT_KEYS,
+                "max_cells": MAX_RESULT_CELLS,
+                "max_bytes": MAX_RESULT_BYTES,
+            },
+            "note": "show(value) surfaces a computed value so the page can "
+                    "render it as a table. The serializer is bounded and "
+                    "degrades unrepresentable objects to a short repr; it is a "
+                    "display path, not a security boundary, and reads a value "
+                    "the snippet already produced (never a file).",
         },
     })
 

@@ -40,6 +40,14 @@ attacker. The honest framing, in order of strength:
    animation), and matplotlib only enters scope *after* the rlimits are set —
    so a runaway plot is just another killable child, not a hole.
 
+   **Structured results:** ``show(value)`` surfaces a *value* — a number, a
+   list, a table of rows (a list of equal-length lists), a dict, or a set — so
+   the page can render it as a table, the analogue of a REPL echoing the last
+   expression. The value passes through a bounded serializer (depth / count /
+   cell / byte caps) that degrades unrepresentable objects to a short ``repr``;
+   it is a display path, not a security boundary, and it reads a value the
+   snippet already produced — it never reads a file.
+
 Blast radius: a low-privilege ``agent`` user on an isolated machine that cannot
 reach the other agents or the outside world. That is the honest ceiling of what
 this can be; we do not pretend otherwise.
@@ -73,6 +81,16 @@ MAX_IMAGE_PIXELS = (1600, 1200) # cap per-figure resolution
 FIG_DPI = 100                   # render DPI
 FIG_SIZE = (7, 4.5)             # default figure size in inches
 SHARED_MAX_CHARS = 4000         # cap a shareable snippet (URL length + honest limit)
+# --- Structured results: what show(value) may surface as a JSON-serializable
+#     value (scalar, list/tuple, dict, or set) so the page can render a table.
+#     These bounds are small on purpose: they keep a single run's JSON payload
+#     and the rendered table well under a sane size. Nothing here is a security
+#     boundary -- it is a display cap, not a safety cap (the rlimits are that).
+MAX_RESULT_DEPTH = 6            # nesting depth (list/dict/set) before we truncate
+MAX_RESULT_ITEMS = 500          # max elements kept in one list/tuple/set
+MAX_RESULT_KEYS = 500           # max keys kept in one dict
+MAX_RESULT_CELLS = 1200         # total cells (list items + dict entries) per value
+MAX_RESULT_BYTES = 64 * 1024    # max size of the serialized JSON per value
 
 # The child interpreter runs isolated (-I) and executes this harness. User code
 # is read from stdin. A single JSON line is written to stderr so the parent can
@@ -304,6 +322,82 @@ plt._figures = _plt_figures
 # globals, locals, vars, breakpoint, numpy. os/socket/subprocess/shutil/sys not
 # in scope. No file or network access of any kind from a snippet.
 
+# --- Structured results: show(value) -----------------------------------------
+# A snippet can surface a *value* (a number, a list, a table of rows, a dict, a
+# set) for the page to render as a table -- the analogue of what a REPL shows
+# for the last expression, but explicit and capped. The serializer below is the
+# ONLY way a value reaches the page: it is bounded (depth / count / cells /
+# bytes) and it never serializes an arbitrary object (it degrades to repr). It
+# is a display path, not a security boundary -- and it opens no escalation path
+# (it reads a value a snippet already produced, never a file).
+_MAXDEPTH = @MAXDEPTH@
+_MAXITEMS = @MAXITEMS@
+_MAXKEYS = @MAXKEYS@
+_MAXCELLS = @MAXCELLS@
+_MAXBYTES = @MAXBYTES@
+
+
+def _to_cell(x, depth=0):
+    # Recursively convert a value to a JSON-serializable form under hard bounds.
+    # Returns a plain JSON-able value; unrepresentable values degrade to a short
+    # repr, never to their full object graph.
+    _cells = [0]
+
+    def conv(v, d):
+        if v is None or isinstance(v, (bool, int, str)):
+            return v
+        if isinstance(v, float):
+            # keep the JSON small; NaN/inf have no JSON form -> None
+            if v != v or v == float("inf") or v == float("-inf"):
+                return None
+            return round(v, 8)
+        if d >= _MAXDEPTH:
+            # too deep to expand -- name the type, do not expand the object
+            return {"_truncated": True, "_type": type(v).__name__}
+        if isinstance(v, (list, tuple, set, frozenset)):
+            out = []
+            for item in v:
+                if len(out) >= _MAXITEMS or _cells[0] >= _MAXCELLS:
+                    out.append({"_truncated": True})
+                    break
+                _cells[0] += 1
+                out.append(conv(item, d + 1))
+            return out
+        if isinstance(v, dict):
+            out = {}
+            for k, val in v.items():
+                if len(out) >= _MAXKEYS or _cells[0] >= _MAXCELLS:
+                    out["_<truncated>"] = True
+                    break
+                key = k if isinstance(k, int) else str(k)  # JSON wants str keys
+                _cells[0] += 1
+                out[key] = conv(val, d + 1)
+            return out
+        # non-container, non-scalar: degrade to a short repr (no object graph)
+        try:
+            return repr(v)[:200]
+        except Exception:
+            return "<unrepresentable>"
+
+    return conv(x, depth)
+
+
+def _show_result(x):
+    # Register a value for the page to render. Bounded: even a huge value is
+    # capped and, if its serialized form still exceeds the byte budget, replaced
+    # by an honest "too large" stub rather than a giant payload.
+    cell = _to_cell(x)
+    try:
+        if len(json.dumps(cell, default=str, separators=(",", ":"))) > _MAXBYTES:
+            cell = {"_truncated": True, "_note": "value exceeds the display size limit",
+                    "_type": type(x).__name__}
+    except (TypeError, ValueError):
+        cell = {"_truncated": True, "_note": "value could not be serialized",
+                "_type": type(x).__name__}
+    _results.append(cell)
+    return None
+
+
 def _emit(payload):
     sys.stderr.write(json.dumps(payload) + "\n")
     sys.stderr.flush()
@@ -312,24 +406,28 @@ code = sys.stdin.read()
 ns = {"__builtins__": _builtins, "__name__": "__compute__"}
 ns.update(_MODULES)
 ns["plt"] = plt
+ns["show"] = _show_result
 _MAXOUT = @MAXOUT@
 
 buf = io.StringIO()
 _images = []
+_results = []
 try:
     _LIMITS()
     with _cl.redirect_stdout(buf):
         exec(code, ns)
-    _emit({"ok": True, "out": buf.getvalue()[:_MAXOUT], "error": None, "images": _images})
+    _emit({"ok": True, "out": buf.getvalue()[:_MAXOUT], "error": None,
+           "images": _images, "results": _results})
 except SystemExit as _e:
     _emit({"ok": True, "out": buf.getvalue()[:_MAXOUT],
-           "error": None, "note": "SystemExit(%r)" % (_e.code,), "images": _images})
+           "error": None, "note": "SystemExit(%r)" % (_e.code,),
+           "images": _images, "results": _results})
 except Exception:
     _tb = traceback.format_exc()
     _emit({"ok": False, "out": buf.getvalue()[:_MAXOUT],
            "error": _tb.strip(),
            "exception": _tb.strip().splitlines()[-1] if _tb.strip() else "",
-           "images": _images})
+           "images": _images, "results": _results})
 """
 
 _HARNESS = (
@@ -343,6 +441,11 @@ _HARNESS = (
     .replace("@FIGSIZE@", repr(FIG_SIZE))
     .replace("@MAXPIXEL@", repr(MAX_IMAGE_PIXELS))
     .replace("@MAXIMAGES@", str(MAX_IMAGES))
+    .replace("@MAXDEPTH@", str(MAX_RESULT_DEPTH))
+    .replace("@MAXITEMS@", str(MAX_RESULT_ITEMS))
+    .replace("@MAXKEYS@", str(MAX_RESULT_KEYS))
+    .replace("@MAXCELLS@", str(MAX_RESULT_CELLS))
+    .replace("@MAXBYTES@", str(MAX_RESULT_BYTES))
 )
 
 _compute_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
@@ -634,6 +737,7 @@ def _interpret(rc, out, err, timed_out):
             "timed_out": True,
             "out": (result or {}).get("out", ""),
             "images": (result or {}).get("images", []),
+            "results": (result or {}).get("results", []),
             "error": "Execution exceeded the %ds wall-clock limit and was killed."
                      % WALL_TIMEOUT_SECONDS,
             "exception": "Timeout",
@@ -647,6 +751,7 @@ def _interpret(rc, out, err, timed_out):
             "timed_out": rc == -signal.SIGXCPU,
             "out": (result or {}).get("out", ""),
             "images": (result or {}).get("images", []),
+            "results": (result or {}).get("results", []),
             "error": ("Exceeded the %ds CPU-time limit and was killed."
                       % CPU_TIME_LIMIT_SECONDS),
             "exception": "ResourceLimit",
@@ -659,6 +764,7 @@ def _interpret(rc, out, err, timed_out):
             "timed_out": False,
             "out": result.get("out", "")[:MAX_OUTPUT_CHARS],
             "images": result.get("images", []),
+            "results": result.get("results", []),
             "error": result.get("error"),
             "exception": result.get("exception"),
             "note": result.get("note"),
@@ -672,6 +778,7 @@ def _interpret(rc, out, err, timed_out):
         "timed_out": False,
         "out": (out or "")[:MAX_OUTPUT_CHARS],
         "images": [],
+        "results": [],
         "error": (err or "").strip() or ("Process exited with code %s." % rc),
         "exception": None,
         "rc": rc,
@@ -681,20 +788,26 @@ def _interpret(rc, out, err, timed_out):
 def run_compute(code, wall_timeout=WALL_TIMEOUT_SECONDS):
     """Run ``code`` in the isolated, limited interpreter.
 
-    Returns a dict: ``{ok, out, images, error, exception, timed_out, note, rc}``.
+    Returns a dict: ``{ok, out, images, results, error, exception, timed_out, note, rc}``.
     ``images`` is a list of ``{format, bytes, data_url}`` for any figures a
-    snippet produced via ``plt.show()`` (empty when the snippet plots nothing).
+    snippet produced via ``plt.show()`` (empty when it plots nothing).
+    ``results`` is a list of JSON-serializable values a snippet surfaced via
+    ``show(value)`` -- scalars, or lists/dicts/sets the page renders as tables
+    (empty when the snippet calls ``show`` on nothing). Both are capped, so a
+    single run can never produce an oversized payload.
     Never raises for user-code problems; only raises if the sandbox itself is
     misconfigured (e.g. the interpreter is missing).
     """
     if not isinstance(code, str) or not code.strip():
-        return {"ok": False, "out": "", "images": [], "error": "No code supplied.",
+        return {"ok": False, "out": "", "images": [], "results": [],
+                "error": "No code supplied.",
                 "exception": None, "timed_out": False, "note": None, "rc": None}
 
     code = code.strip()
 
     if not _compute_slots.acquire(timeout=wall_timeout + 2):
-        return {"ok": False, "out": "", "images": [], "error": "Workbench is busy; try again in a moment.",
+        return {"ok": False, "out": "", "images": [], "results": [],
+                "error": "Workbench is busy; try again in a moment.",
                 "exception": None, "timed_out": False, "note": "overloaded", "rc": None}
     try:
         try:

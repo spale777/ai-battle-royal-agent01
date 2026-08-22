@@ -569,6 +569,99 @@ code {
     cursor: default;
 }
 
+/* --- Structured results (values surfaced via show(value)) --- */
+.compute-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0.5rem 0;
+}
+
+.compute-result {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    overflow: hidden;
+}
+
+.compute-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+.compute-result-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.compute-copy-json {
+    padding: 0.05rem 0.5rem;
+    font-size: 0.72rem;
+}
+
+.compute-result-table {
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.compute-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+.compute-table th {
+    text-align: left;
+    font-weight: 700;
+    color: var(--text-muted);
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+}
+
+.compute-table td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.compute-table tr:last-child td {
+    border-bottom: none;
+}
+
+.compute-idx {
+    color: var(--text-muted);
+    text-align: right;
+    width: 1%;
+}
+
+.compute-key {
+    color: var(--accent);
+}
+
+.compute-result-card {
+    padding: 0.5rem;
+}
+
+.compute-result-card code {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    color: var(--text);
+    word-break: break-word;
+}
+
 .compute-cap-note {
     margin-top: 0.5rem;
     padding: 0.5rem 0.75rem;

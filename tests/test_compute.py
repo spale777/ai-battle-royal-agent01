@@ -13,6 +13,8 @@ import os
 
 import pytest
 
+import json
+
 import compute
 from compute import run_compute
 
@@ -409,4 +411,178 @@ def test_sandbox_workbench_image_download_wiring(client):
     assert ".compute-figure" in css
     assert ".compute-dl" in css
     assert ".compute-figure-cap" in css
+
+
+# ---- Structured results: show(value) ----------------------------------------
+# A snippet can surface a *value* (scalar, list, table of rows, dict, set) via
+# show(value); the server serializes it under hard bounds (depth / count /
+# cell / byte caps) and the page renders it as a table or card. These tests
+# lock in that contract: correct shapes, honest capping, graceful degradation
+# of unrepresentable objects, and — critically — that the new surface opens no
+# escalation path.
+
+def test_compute_show_scalar_int():
+    r = run_compute("show(42)")
+    assert r["ok"] is True
+    assert r["results"] == [42]
+
+
+def test_compute_show_scalar_string_and_bool():
+    assert run_compute("show('hi')")["results"] == ["hi"]
+    assert run_compute("show(True)")["results"] == [True]
+    assert run_compute("show(None)")["results"] == [None]
+
+
+def test_compute_show_table_of_rows():
+    r = run_compute("show([[1, 2, 3], [4, 5, 6]])")
+    assert r["ok"] is True
+    assert r["results"] == [[[1, 2, 3], [4, 5, 6]]]
+
+
+def test_compute_show_dict():
+    r = run_compute("show({'a': 1, 'b': 2})")
+    assert r["ok"] is True
+    assert r["results"] == [{"a": 1, "b": 2}]
+
+
+def test_compute_show_dict_int_key_is_stringified():
+    # JSON object keys must be strings: an int key comes back as "1".
+    r = run_compute("show({1: 'a'})")
+    assert r["results"] == [{"1": "a"}]
+
+
+def test_compute_show_set_becomes_list():
+    r = run_compute("show({3, 1, 2})")
+    assert r["ok"] is True
+    assert sorted(r["results"][0]) == [1, 2, 3]
+
+
+def test_compute_show_multiple_preserves_order():
+    r = run_compute("show(1)\nshow([1, 2])\nshow({'k': 'v'})")
+    assert r["ok"] is True
+    assert r["results"] == [1, [1, 2], {"k": "v"}]
+
+
+def test_compute_show_floats_and_nan():
+    # NaN/inf have no JSON form -> they degrade to null (None), not a crash.
+    r = run_compute("show([1.0, float('nan'), 2.5])")
+    assert r["ok"] is True
+    assert r["results"] == [[1.0, None, 2.5]]
+
+
+def test_compute_show_big_list_is_capped():
+    # A huge list is truncated to the item cap plus one explicit truncation
+    # marker, so a single run can never produce an oversized payload.
+    r = run_compute("show(list(range(2000)))")
+    assert r["ok"] is True
+    items = r["results"][0]
+    assert len(items) == compute.MAX_RESULT_ITEMS + 1
+    assert items[-1] == {"_truncated": True}
+
+
+def test_compute_show_depth_is_capped():
+    # Six levels of nesting are kept; the seventh is cut with a marker, so a
+    # deeply (or cyclically) nested value cannot blow up the payload.
+    shallow = run_compute("show(" + "[" * 6 + "1" + "]" * 6 + ")")
+    assert shallow["ok"] is True
+    assert "_truncated" not in json.dumps(shallow["results"])
+    deep = run_compute("show(" + "[" * 7 + "1" + "]" * 7 + ")")
+    assert deep["ok"] is True
+    assert "_truncated" in json.dumps(deep["results"])
+
+
+def test_compute_show_circular_reference_does_not_hang():
+    # A value that references itself must be cut off, not infinite-loop.
+    r = run_compute("lst = []\nlst.append(lst)\nshow(lst)")
+    assert r["ok"] is True
+    assert "_truncated" in json.dumps(r["results"])
+
+
+def test_compute_show_arbitrary_object_degrades_to_repr():
+    # Non-container, non-scalar values degrade to a short repr (no object
+    # graph is serialized), so an arbitrary object can't smuggle data out.
+    r = run_compute("show(complex(1, 2))")
+    assert r["ok"] is True
+    assert r["results"] == ["(1+2j)"]
+    rb = run_compute("show(b'\\x00\\x01')")
+    assert rb["ok"] is True
+    assert isinstance(rb["results"][0], str)
+
+
+def test_compute_show_no_args_is_reported_not_raised():
+    # show() with no argument is a user error -> a *reported* TypeError, not a
+    # crash that takes down the worker (the same contract as any snippet error).
+    r = run_compute("show()")
+    assert r["ok"] is False
+    assert "TypeError" in (r["exception"] or "")
+
+
+def test_compute_show_does_not_open_escalation_paths():
+    # Adding show() to the namespace must not reopen anything: the escalation
+    # paths stay blocked, and you cannot feed show() a file handle (open is out
+    # of scope), so it cannot become a file-read oracle.
+    for snip in ["import os", "open('/tmp/x')", "eval('1+1')",
+                 "show(open('/etc/hostname'))", "show(__import__('os'))"]:
+        r = run_compute(snip)
+        assert r["ok"] is False, f"should stay blocked: {snip!r}"
+        assert r["timed_out"] is False
+
+
+def test_api_compute_returns_results(client):
+    resp = client.post("/api/compute", json={"code": "show([[1, 2], [3, 4]])"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["results"] == [[[1, 2], [3, 4]]]
+    # The response must be JSON-safe (it round-trips through get_json intact).
+    assert json.dumps(data)
+
+
+def test_api_compute_results_empty_when_unused(client):
+    resp = client.post("/api/compute", json={"code": "print(1 + 1)"})
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["results"] == []
+
+
+def test_api_compute_results_shape_on_error(client):
+    # Even a failing snippet carries a (possibly partial) results list, so the
+    # API shape is stable for the client to rely on.
+    resp = client.post("/api/compute", json={"code": "show(1)\nraise ValueError('x')"})
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert isinstance(data.get("results"), list)
+
+
+def test_capabilities_exposes_results_surface(client):
+    data = client.get("/api/compute/capabilities").get_json()
+    assert data["results"]["enabled"] is True
+    assert data["results"]["function"] == "show"
+    limits = data["results"]["limits"]
+    assert limits["max_items"] == compute.MAX_RESULT_ITEMS
+    assert limits["max_cells"] == compute.MAX_RESULT_CELLS
+    assert limits["max_depth"] == compute.MAX_RESULT_DEPTH
+
+
+def test_sandbox_page_has_results_wiring(client):
+    """The structured-results display is client-side JS built from r.results.
+
+    A hermetic test asserts the wiring that must be present in the served page
+    (the render helpers, the Copy-JSON event target, the copy helper, and the
+    CSS that styles the tables). A regression that drops any of these silently
+    strips the capability with no server error to catch it.
+    """
+    html = client.get("/sandbox").get_data(as_text=True)
+    assert "function renderResults" in html            # build the results block
+    assert "function renderResultValue" in html        # per-value shape + markup
+    assert "r.results" in html                         # reads the API field
+    assert "data-ridx" in html                         # which result to copy
+    assert "compute-copy-json" in html                 # Copy JSON button
+    assert "function copyText" in html                 # clipboard helper (fallback)
+    assert "class=\"compute-table\"" in html           # the rendered <table>
+    assert "show(value)" in html                       # discoverable in the intro
+    css = client.get("/static/style.css").get_data(as_text=True)
+    assert ".compute-result" in css
+    assert ".compute-table" in css
+    assert ".compute-copy-json" in css
 
