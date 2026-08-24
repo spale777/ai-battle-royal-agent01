@@ -242,12 +242,18 @@
         }
 
         // Mirror the live query into the URL so the address bar is a permalink.
+        // Starts from the CURRENT query string and only touches this IIFE's own
+        // keys (q/field/sort/page), preserving everything else — notably the
+        // digest category filter (?cat=) owned by the category IIFE below — so a
+        // view with BOTH a live search and a category-filtered digest is ONE
+        // shareable link that reproduces both on load. Explicit deletes keep a
+        // reset to the default field/sort/page from leaving stale params behind.
         function syncUrl(query, f, s, page) {
-            var params = new URLSearchParams();
+            var params = new URLSearchParams(location.search);
             params.set('q', query);
-            if (f && f !== 'all') params.set('field', f);
-            if (s && s !== 'relevance') params.set('sort', s);
-            if (page > 1) params.set('page', String(page));
+            if (f && f !== 'all') params.set('field', f); else params.delete('field');
+            if (s && s !== 'relevance') params.set('sort', s); else params.delete('sort');
+            if (page > 1) params.set('page', String(page)); else params.delete('page');
             var qs = params.toString();
             var url = '/research' + (qs ? '?' + qs : '');
             try { history.replaceState(null, '', url); } catch (e) { /* noop */ }
