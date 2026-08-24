@@ -894,6 +894,63 @@ def api_research_search():
     return jsonify(result)
 
 
+@app.route("/api/research/search/export")
+def api_research_search_export():
+    """Export a live arXiv *search* result set as a downloadable file:
+    BibTeX (.bib), CSV, or JSON — the same formats and the same
+    research.bibtex() single source of truth the digest export uses.
+
+    The digest was already exportable, but a live search result was not: a
+    researcher who ran a good query could cite one paper but not take the set.
+    This closes that gap. It re-runs the SAME deterministic search the UI
+    shows (same query/field/sort/page) and exports exactly the papers the
+    visitor was looking at, so "export" means "export what you see" — and a
+    ?q=...&field=...&sort=...&page=... deep link reproduces it byte-for-byte.
+
+    Read-only: it queries arXiv and serializes their results; no code runs,
+    nothing is stored. `format` is allow-listed; `max` is clamped to arXiv's
+    per-page cap (30), so a single export is bounded to one page of results."""
+    from research import search, export_papers, EXPORT_FORMATS
+    from research import MAX_RESULTS_CAP, MIN_QUERY_CHARS
+    fmt = (request.args.get("format") or "bibtex").strip().lower()
+    if fmt not in EXPORT_FORMATS:
+        return jsonify({"error": f"format must be one of {list(EXPORT_FORMATS)}",
+                        "formats": list(EXPORT_FORMATS)}), 400
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "Provide a query: /api/research/search/export?q=...&format=bibtex"}), 400
+    if len(q) < MIN_QUERY_CHARS:
+        return jsonify({"error": f"Query too short (min {MIN_QUERY_CHARS} chars)."}), 400
+    try:
+        max_results = int(request.args.get("max", 12))
+    except (TypeError, ValueError):
+        max_results = 12
+    max_results = max(1, min(max_results, MAX_RESULTS_CAP))
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, page)
+    field = request.args.get("field", "all")
+    sort = request.args.get("sort", "relevance")
+    result = search(q, max_results=max_results, field=field, sort=sort, page=page)
+    papers = result.get("papers", [])
+    body = export_papers(papers, fmt=fmt)  # no cat: a search result is not category-filtered
+    ext = {"bibtex": "bib", "csv": "csv", "json": "json"}[fmt]
+    content_type = {
+        "bibtex": "application/x-bibtex",
+        "csv": "text/csv",
+        "json": "application/json",
+    }[fmt]
+    # Reflect the query in the filename so a saved file says what it is.
+    q_slug = re.sub(r"[^A-Za-z0-9]+", "-", q).strip("-")[:40] or "query"
+    resp = Response(body, content_type=content_type)
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="arxiv-search-{q_slug}-p{page}.{ext}"')
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.route("/api/compute", methods=["POST"])
 def api_compute():
     from compute import run_compute, record_compute
@@ -1164,6 +1221,10 @@ _API_CHECKS = [
     # variants are plain text, so this probes the JSON variant, which returns a
     # top-level "papers" list just like /api/research.
     ("/api/research/export?format=json", "papers", list, True),
+    # Live-search result export (bibtex/csv/json). Like the search endpoint
+    # above it may honestly return an empty result set, so non-null is off —
+    # the probe checks the route is live and returns the JSON shape.
+    ("/api/research/search/export?q=ai&format=json", "papers", list, False),
 ]
 
 

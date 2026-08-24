@@ -35,6 +35,7 @@
     <div id="arxiv-status" class="arxiv-status" aria-live="polite"></div>
     <div id="arxiv-results"></div>
     <div id="arxiv-pager" class="arxiv-pager" aria-live="polite"></div>
+    <div id="arxiv-search-export" class="research-export" style="display:none" aria-live="polite"></div>
 </section>
 
 <section>
@@ -315,6 +316,57 @@
             pager.appendChild(share);
         }
 
+        // Build (or clear) the "export this result set" bar under the search
+        // results. Built entirely from textContent + <a> elements (no innerHTML
+        // of untrusted data) so the strict CSP needs nothing new. The hrefs are
+        // plain same-origin downloads to /api/research/search/export with the
+        // SAME query/field/sort/page the visitor just searched — so "export"
+        // means "export what you see", and the link is reproducible.
+        function renderSearchExport(j) {
+            var bar = document.getElementById('arxiv-search-export');
+            if (!bar) return;
+            bar.innerHTML = '';
+            var papers = j.papers || [];
+            if (!papers.length) { bar.style.display = 'none'; return; }
+            var sp = new URLSearchParams();
+            sp.set('q', j.query || '');
+            if (j.field && j.field !== 'all') sp.set('field', j.field);
+            if (j.sort && j.sort !== 'relevance') sp.set('sort', j.sort);
+            var page = j.page || 1;
+            if (page > 1) sp.set('page', String(page));
+            var base = '/api/research/search/export?' + sp.toString() + '&max=' + MAX;
+
+            var label = document.createElement('span');
+            label.className = 'export-label';
+            label.textContent = 'Export these results';
+            bar.appendChild(label);
+
+            ['bibtex', 'csv', 'json'].forEach(function (f) {
+                var a = document.createElement('a');
+                a.className = 'export-btn';
+                a.href = base + '&format=' + f;
+                a.textContent = (f === 'bibtex') ? 'BibTeX (.bib)' : f.toUpperCase();
+                a.title = 'Download these search results as ' +
+                           ((f === 'bibtex') ? 'a BibTeX (.bib) file' : f.toUpperCase());
+                bar.appendChild(a);
+            });
+
+            var note = document.createElement('span');
+            note.className = 'export-note';
+            var total = (j.source === 'arxiv' && j.total_results != null)
+                ? (j.total_results + ' total on arXiv')
+                : '';
+            note.textContent = (papers.length + ' on this page' + (total ? ' · ' + total : ''));
+            bar.appendChild(note);
+
+            bar.style.display = '';
+        }
+
+        function clearSearchExport() {
+            var bar = document.getElementById('arxiv-search-export');
+            if (bar) bar.style.display = 'none';
+        }
+
         function doSearch(pageOverride) {
             var query = (q.value || '').trim();
             if (query.length < 2) {
@@ -336,6 +388,7 @@
             setStatus('<span class="arxiv-busy">Querying arXiv…</span>');
             results.innerHTML = '';
             clearPager();
+            clearSearchExport();
             fetch('/api/research/search?' + params.toString())
                 .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
@@ -353,11 +406,13 @@
                     }
                     render(j.papers, source);
                     renderPager(j);
+                    renderSearchExport(j);
                 })
                 .catch(function (e) {
                     setStatus('<span class="arxiv-err">Request failed: ' + e + '</span>');
                     results.innerHTML = '';
                     clearPager();
+                    clearSearchExport();
                 })
                 .finally(function () {
                     go.disabled = false;
