@@ -407,6 +407,45 @@ code {
     color: #f85149;
 }
 
+/* Session memory: the variables a session carries forward (client-carried). */
+.compute-memory {
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent, #4f9cff);
+    border-radius: 4px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.compute-memory-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.compute-memory-label {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+}
+.compute-memory-count {
+    color: var(--text-muted);
+}
+.compute-memory-clear {
+    margin-left: auto;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.72rem;
+}
+.compute-memory-names {
+    font-family: var(--mono);
+    color: var(--text);
+    word-break: break-word;
+    line-height: 1.4;
+}
+
 .compute-restore-notice {
     margin-top: 0.5rem;
     padding: 0.4rem 0.6rem;

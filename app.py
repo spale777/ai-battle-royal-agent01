@@ -953,7 +953,7 @@ def api_research_search_export():
 
 @app.route("/api/compute", methods=["POST"])
 def api_compute():
-    from compute import run_compute, record_compute
+    from compute import run_compute, record_compute, MAX_STATE_BYTES
     data = request.get_json(silent=True) or {}
     code = data.get("code", "")
     if not isinstance(code, str):
@@ -963,7 +963,25 @@ def api_compute():
         return jsonify({"ok": False, "out": "", "timed_out": False,
                         "error": "Snippet too long (max 50000 chars).",
                         "exception": None, "note": "too_long", "rc": None}), 413
-    result = run_compute(code)
+    # The prior run's session state (client-carried). Accept only a dict; refuse
+    # a state blob that would balloon the request (the child would reject it too,
+    # but an early 413 is cheaper and honest).
+    state = data.get("state")
+    state_bytes = 0
+    if state is not None:
+        if not isinstance(state, dict):
+            state = None
+        else:
+            try:
+                state_bytes = len(json.dumps(state, ensure_ascii=False))
+            except (TypeError, ValueError):
+                state = None
+    if state is not None and state_bytes > MAX_STATE_BYTES:
+        return jsonify({"ok": False, "out": "", "images": [], "results": [],
+                        "state": {}, "state_dropped": [], "timed_out": False,
+                        "error": "Session state too large (max %d bytes)." % MAX_STATE_BYTES,
+                        "exception": None, "note": "state_too_large", "rc": None}), 413
+    result = run_compute(code, state=state)
     record_compute(code, result)
     # 200 for every outcome: a snippet error is a valid, expected result, not a
     # server failure. Non-2xx is reserved for transport/usage errors (e.g. 413).
@@ -1024,7 +1042,9 @@ def api_compute_capabilities():
                          MAX_PROCESSES, MAX_OUTPUT_CHARS, MAX_CONCURRENT,
                          MAX_IMAGES, FIG_DPI,
                          MAX_RESULT_DEPTH, MAX_RESULT_ITEMS, MAX_RESULT_KEYS,
-                         MAX_RESULT_CELLS, MAX_RESULT_BYTES)
+                         MAX_RESULT_CELLS, MAX_RESULT_BYTES,
+                         MAX_STATE_DEPTH, MAX_STATE_ITEMS, MAX_STATE_KEYS,
+                         MAX_STATE_BYTES)
     return jsonify({
         "wall_timeout_seconds": WALL_TIMEOUT_SECONDS,
         "cpu_time_limit_seconds": CPU_TIME_LIMIT_SECONDS,
@@ -1067,6 +1087,30 @@ def api_compute_capabilities():
                     "degrades unrepresentable objects to a short repr; it is a "
                     "display path, not a security boundary, and reads a value "
                     "the snippet already produced (never a file).",
+        },
+        "state": {
+            "enabled": True,
+            "mechanism": "client-carried session: run N's data variables are "
+                         "echoed back in result['state'] and sent as the next "
+                         "run's 'state', so a snippet can reference the "
+                         "previous run's variables (a REPL, not a one-shot).",
+            "persistence": "JSON-only and exact -- a variable is carried only "
+                           "if it can be re-created bit-identically in a fresh "
+                           "interpreter (no pickle, so no code can survive). "
+                           "Non-persistable names (functions, sets, bytes, "
+                           "NaN/inf, oversize) are dropped and reported by "
+                           "name in result['state_dropped'], never truncated.",
+            "reserved_names": "plt, show, and the pre-loaded modules can never "
+                              "be shadowed by session state.",
+            "storage": "none on the server -- the browser owns its own session; "
+                       "a public endpoint keeps no user data and cannot leak "
+                       "one user's state to another.",
+            "limits": {
+                "max_depth": MAX_STATE_DEPTH,
+                "max_items": MAX_STATE_ITEMS,
+                "max_keys": MAX_STATE_KEYS,
+                "max_bytes": MAX_STATE_BYTES,
+            },
         },
     })
 

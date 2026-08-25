@@ -56,8 +56,10 @@ this can be; we do not pretend otherwise.
 import base64
 import datetime
 import json
+import math
 import os
 import resource
+import re
 import signal
 import subprocess
 import sys
@@ -91,6 +93,20 @@ MAX_RESULT_ITEMS = 500          # max elements kept in one list/tuple/set
 MAX_RESULT_KEYS = 500           # max keys kept in one dict
 MAX_RESULT_CELLS = 1200         # total cells (list items + dict entries) per value
 MAX_RESULT_BYTES = 64 * 1024    # max size of the serialized JSON per value
+
+# --- Session state (carry data variables between runs) ----------------------
+# A workbench session is a REPL: run 1 defines `data`, run 2 analyzes it. State
+# travels client -> server -> client (the browser owns its own session; the
+# server stores nothing, so a public endpoint never keeps one user's data and
+# never leaks it to another). Persistence is JSON-only and EXACT: a variable is
+# carried only if it can be re-created bit-identically in a fresh interpreter
+# (no pickle -- no code can survive a JSON round-trip). Anything else is
+# dropped and reported by name, never truncated into a silently-wrong value.
+# These bounds keep a session's payload small enough to ride in an HTTP body.
+MAX_STATE_DEPTH = 40          # nesting depth (list/dict) before we stop
+MAX_STATE_ITEMS = 20000       # max elements kept across ALL containers
+MAX_STATE_KEYS = 2000         # max keys kept across ALL dicts
+MAX_STATE_BYTES = 512 * 1024  # max size of the whole session's JSON (in or out)
 
 # The child interpreter runs isolated (-I) and executes this harness. User code
 # is read from stdin. A single JSON line is written to stderr so the parent can
@@ -335,6 +351,10 @@ _MAXITEMS = @MAXITEMS@
 _MAXKEYS = @MAXKEYS@
 _MAXCELLS = @MAXCELLS@
 _MAXBYTES = @MAXBYTES@
+_STATE_DEPTH = @STATEDEPTH@
+_STATE_ITEMS = @STATEITEMS@
+_STATE_KEYS = @STATEKEYS@
+_STATE_BYTES = @STATEBYTES@
 
 
 def _to_cell(x, depth=0):
@@ -402,32 +422,208 @@ def _emit(payload):
     sys.stderr.write(json.dumps(payload) + "\n")
     sys.stderr.flush()
 
+import io, math as _math, datetime as _dt, decimal as _decimal, json as _json
+
+# --- Session-state round-trip codec (the single authority) -------------------
+# The only way a value crosses a run boundary. It round-trips through JSON with
+# tagged wrappers for the non-JSON types (datetime/date/timedelta/Decimal) so a
+# value reloads bit-identically in a fresh interpreter. No pickle, so no code can
+# ever survive; a value we cannot recreate exactly is DROPPED and reported by
+# name (never truncated into a silently-wrong number).
+def _st_encode(v, d):
+    if d > _STATE_DEPTH:
+        raise ValueError("too deep")
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        if _math.isnan(v) or _math.isinf(v):
+            raise ValueError("float is not JSON-safe (NaN/inf)")
+        return v
+    if isinstance(v, str):
+        return v
+    if isinstance(v, _dt.datetime):
+        return {"$a01:type": "dt", "$a01:value": v.isoformat()}
+    if isinstance(v, _dt.date):
+        return {"$a01:type": "date", "$a01:value": v.isoformat()}
+    if isinstance(v, _dt.timedelta):
+        return {"$a01:type": "td", "$a01:value": [v.days, v.seconds, v.microseconds]}
+    if isinstance(v, _decimal.Decimal):
+        return {"$a01:type": "dec", "$a01:value": str(v)}
+    if isinstance(v, (list, tuple)):
+        return [_st_encode(x, d + 1) for x in v]
+    if isinstance(v, dict):
+        out = {}
+        for k, val in v.items():
+            if isinstance(k, bool) or not (isinstance(k, str) or isinstance(k, int)):
+                raise ValueError("dict key must be str or int")
+            # int keys are carried as their string form -- the exact JSON form
+            # (JSON object keys are strings); a round-trip is stable because the
+            # decoded side decodes every key as a string too.
+            out[str(k)] = _st_encode(val, d + 1)
+        return out
+    raise ValueError("type %s" % type(v).__name__)
+
+def _st_decode(v, d):
+    if d > _STATE_DEPTH:
+        raise ValueError("too deep")
+    if isinstance(v, dict) and set(v.keys()) <= {"$a01:type", "$a01:value"} and "$a01:type" in v:
+        t = v["$a01:type"]
+        if t not in ("dt", "date", "td", "dec"):
+            return v  # wrapper-shaped but unknown type: keep it a plain dict
+        if t == "dt":
+            return _dt.datetime.fromisoformat(v["$a01:value"])
+        if t == "date":
+            return _dt.date.fromisoformat(v["$a01:value"])
+        if t == "td":
+            return _dt.timedelta(days=v["$a01:value"][0], seconds=v["$a01:value"][1], microseconds=v["$a01:value"][2])
+        if t == "dec":
+            return _decimal.Decimal(v["$a01:value"])
+    if isinstance(v, dict):
+        return {k: _st_decode(x, d + 1) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_st_decode(x, d + 1) for x in v]
+    return v
+
+def _st_exact(v):
+    # Return the value re-created through the JSON round-trip, or raise
+    # ValueError if it is not exactly representable (wrong type, NaN/inf, too
+    # deep, or its serialized form is not byte-stable). A value passes only if
+    # this succeeds: persistence is exact, or it does not happen at all.
+    enc = _st_encode(v, 0)
+    s = _json.dumps(enc, allow_nan=False, separators=(",", ":"), ensure_ascii=False)
+    if len(s) > _STATE_BYTES:
+        raise ValueError("too large")
+    dec = _st_decode(_json.loads(s), 0)
+    s2 = _json.dumps(_st_encode(dec, 0), allow_nan=False, separators=(",", ":"), ensure_ascii=False)
+    if s2 != s:
+        raise ValueError("not an exact round-trip")
+    return dec
+
+def _state_value_ok(v):
+    try:
+        _st_exact(v)
+        return True
+    except Exception:
+        return False
+
+def _count_cells(v, d, depth):
+    if d >= depth:
+        return 1
+    if isinstance(v, (list, tuple)):
+        return sum(_count_cells(x, d + 1, depth) for x in v)
+    if isinstance(v, dict):
+        return sum(_count_cells(x, d + 1, depth) for x in v.values())
+    return 1
+
+def _count_keys(v, d, depth):
+    if d >= depth or not isinstance(v, dict):
+        return 0
+    return sum(1 + _count_keys(x, d + 1, depth) for x in v.values())
+
+def _collect_state(g):
+    # Gather the top-level user data names from the run's namespace into the
+    # next session. Only JSON-exact values carry forward; functions (user defs)
+    # and anything else non-persistable are DROPPED and listed by name, so the
+    # page can say exactly what did not survive instead of silently losing it.
+    # Dunder and harness-internal names never cross the boundary; cells/keys are
+    # capped so a single session cannot balloon past MAX_STATE_*.
+    out = {}
+    dropped = []
+    cells = 0
+    keys = 0
+    for name in sorted(g):
+        if name.startswith("_"):
+            continue  # dunders, __name__, and any _-prefixed name are not user data
+        if name in _RESERVED:
+            continue  # plt / show / pre-loaded modules are harness names, never user data
+        val = g[name]
+        if callable(val):
+            dropped.append(name)
+            continue
+        if not _state_value_ok(val):
+            dropped.append(name)
+            continue
+        c = _count_cells(val, 0, _STATE_DEPTH)
+        k = _count_keys(val, 0, _STATE_DEPTH)
+        if cells + c > _STATE_ITEMS or keys + k > _STATE_KEYS:
+            dropped.append(name)
+            continue
+        out[name] = _st_encode(val, 0)  # wire form: JSON-safe, decodes back exact
+        cells += c
+        keys += k
+    return out, dropped
+# Names a session may never shadow: the plotting surface, the show() helper,
+# and every pre-loaded module. State is seeded *before* these are re-asserted
+# and any state name in this set is dropped (and reported), so a client cannot
+# clobber plt / show / a module.
+_RESERVED = {"plt", "show"}
+_RESERVED.update(_MODULES.keys())
+
 code = sys.stdin.read()
-ns = {"__builtins__": _builtins, "__name__": "__compute__"}
-ns.update(_MODULES)
-ns["plt"] = plt
-ns["show"] = _show_result
 _MAXOUT = @MAXOUT@
+
+# --- Read the run envelope from stdin ---------------------------------------
+# run_compute ALWAYS prefixes the stdin with a state line: base64 of the prior
+# session's state JSON, or an empty line when there is no state. The snippet is
+# everything after the FIRST newline. Riding it in stdin (like the code) keeps
+# it out of argv and env, so an oversize session can never trip ARG_MAX at
+# spawn. An empty envelope line is the "no state" marker; a malformed envelope
+# line degrades to an empty session, never a crash.
+_state_in = {}
+if "\n" in code:
+    _first, code = code.split("\n", 1)
+    if _first.strip():
+        try:
+            _st_raw = base64.urlsafe_b64decode(_first.strip() + "===").decode("utf-8")
+            _state_in = _json.loads(_st_raw)
+        except Exception:
+            _state_in = {}
+if not isinstance(_state_in, dict):
+    _state_in = {}
+
+_state_dropped = []
+_ns_seed = {}
+for _k, _v in _state_in.items():
+    if _k in _RESERVED:
+        _state_dropped.append(_k)
+        continue
+    try:
+        _ns_seed[_k] = _st_decode(_v, 0) if isinstance(_v, (dict, list)) else _v
+    except Exception:
+        _state_dropped.append(_k)
 
 buf = io.StringIO()
 _images = []
 _results = []
+ns = {"__builtins__": _builtins, "__name__": "__compute__"}
+ns.update(_ns_seed)
+ns.update(_MODULES)
+ns["plt"] = plt
+ns["show"] = _show_result
+
 try:
     _LIMITS()
     with _cl.redirect_stdout(buf):
         exec(code, ns)
+    _new_state, _dropped = _collect_state(ns)
+    _state_dropped.extend(_dropped)
     _emit({"ok": True, "out": buf.getvalue()[:_MAXOUT], "error": None,
-           "images": _images, "results": _results})
+           "images": _images, "results": _results,
+           "state": _new_state, "state_dropped": _state_dropped})
 except SystemExit as _e:
     _emit({"ok": True, "out": buf.getvalue()[:_MAXOUT],
            "error": None, "note": "SystemExit(%r)" % (_e.code,),
-           "images": _images, "results": _results})
+           "images": _images, "results": _results,
+           "state": {}, "state_dropped": _state_dropped})
 except Exception:
     _tb = traceback.format_exc()
     _emit({"ok": False, "out": buf.getvalue()[:_MAXOUT],
            "error": _tb.strip(),
            "exception": _tb.strip().splitlines()[-1] if _tb.strip() else "",
-           "images": _images, "results": _results})
+           "images": _images, "results": _results,
+           "state": {}, "state_dropped": _state_dropped})
 """
 
 _HARNESS = (
@@ -446,6 +642,10 @@ _HARNESS = (
     .replace("@MAXKEYS@", str(MAX_RESULT_KEYS))
     .replace("@MAXCELLS@", str(MAX_RESULT_CELLS))
     .replace("@MAXBYTES@", str(MAX_RESULT_BYTES))
+    .replace("@STATEDEPTH@", str(MAX_STATE_DEPTH))
+    .replace("@STATEITEMS@", str(MAX_STATE_ITEMS))
+    .replace("@STATEKEYS@", str(MAX_STATE_KEYS))
+    .replace("@STATEBYTES@", str(MAX_STATE_BYTES))
 )
 
 _compute_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
@@ -718,9 +918,12 @@ def decode_share(token):
     return text
 
 
-def _interpret(rc, out, err, timed_out):
+def _interpret(rc, out, err, timed_out, inbound_state=None):
     """Combine the child's JSON result (if any) with the observed exit/timeout
-    into the response dict the API serves."""
+    into the response dict the API serves. ``inbound_state`` is the prior
+    session's state dict: when a run is killed (wall-clock or CPU limit) before
+    it can report, its variables did not change, so the session returns exactly
+    what it entered with."""
     result = None
     if err:
         # The harness writes exactly one JSON line to stderr; take the last one.
@@ -738,6 +941,8 @@ def _interpret(rc, out, err, timed_out):
             "out": (result or {}).get("out", ""),
             "images": (result or {}).get("images", []),
             "results": (result or {}).get("results", []),
+            "state": inbound_state or {},
+            "state_dropped": (result or {}).get("state_dropped", []),
             "error": "Execution exceeded the %ds wall-clock limit and was killed."
                      % WALL_TIMEOUT_SECONDS,
             "exception": "Timeout",
@@ -752,6 +957,8 @@ def _interpret(rc, out, err, timed_out):
             "out": (result or {}).get("out", ""),
             "images": (result or {}).get("images", []),
             "results": (result or {}).get("results", []),
+            "state": inbound_state or {},
+            "state_dropped": (result or {}).get("state_dropped", []),
             "error": ("Exceeded the %ds CPU-time limit and was killed."
                       % CPU_TIME_LIMIT_SECONDS),
             "exception": "ResourceLimit",
@@ -765,6 +972,8 @@ def _interpret(rc, out, err, timed_out):
             "out": result.get("out", "")[:MAX_OUTPUT_CHARS],
             "images": result.get("images", []),
             "results": result.get("results", []),
+            "state": result.get("state", {}),
+            "state_dropped": result.get("state_dropped", []),
             "error": result.get("error"),
             "exception": result.get("exception"),
             "note": result.get("note"),
@@ -772,48 +981,80 @@ def _interpret(rc, out, err, timed_out):
         }
 
     # No structured result: the child crashed hard or was killed before it
-    # could report. Surface what we can.
+    # could report. Surface what we can; the session is unknown, so it resets.
     return {
         "ok": False,
         "timed_out": False,
         "out": (out or "")[:MAX_OUTPUT_CHARS],
         "images": [],
         "results": [],
+        "state": {},
+        "state_dropped": [],
         "error": (err or "").strip() or ("Process exited with code %s." % rc),
         "exception": None,
         "rc": rc,
     }
 
 
-def run_compute(code, wall_timeout=WALL_TIMEOUT_SECONDS):
+def run_compute(code, state=None, wall_timeout=WALL_TIMEOUT_SECONDS):
     """Run ``code`` in the isolated, limited interpreter.
 
-    Returns a dict: ``{ok, out, images, results, error, exception, timed_out, note, rc}``.
-    ``images`` is a list of ``{format, bytes, data_url}`` for any figures a
-    snippet produced via ``plt.show()`` (empty when it plots nothing).
-    ``results`` is a list of JSON-serializable values a snippet surfaced via
-    ``show(value)`` -- scalars, or lists/dicts/sets the page renders as tables
-    (empty when the snippet calls ``show`` on nothing). Both are capped, so a
-    single run can never produce an oversized payload.
-    Never raises for user-code problems; only raises if the sandbox itself is
-    misconfigured (e.g. the interpreter is missing).
+    Returns a dict: ``{ok, out, images, results, state, state_dropped, error,
+    exception, timed_out, note, rc}``. ``images`` is a list of
+    ``{format, bytes, data_url}`` for any figures a snippet produced via
+    ``plt.show()`` (empty when it plots nothing). ``results`` is a list of
+    JSON-serializable values a snippet surfaced via ``show(value)`` (empty when
+    the snippet calls ``show`` on nothing). ``state`` is the session's data
+    variables after this run (JSON-exact values only; see the codec in the
+    harness); ``state_dropped`` lists names that were in scope but could not be
+    carried forward (user functions, non-persistable objects, oversize). Both
+    images/results are capped, so a single run can never produce an oversized
+    payload.
+
+    ``state`` (optional) is the *prior* run's ``state`` dict, echoed back by a
+    client so this run can reference the previous run's variables. It rides to
+    the child as the first line of the stdin envelope (base64 of the state
+    JSON; empty line when there is none) and is re-asserted against the
+    reserved names, so a client cannot shadow ``plt`` or a module. A killed run
+    returns its inbound session unchanged. The server stores nothing between
+    runs — the browser owns its own session. Never raises for user-code
+    problems; only raises if the sandbox itself is misconfigured (e.g. the
+    interpreter is missing).
     """
     if not isinstance(code, str) or not code.strip():
         return {"ok": False, "out": "", "images": [], "results": [],
+                "state": {}, "state_dropped": [],
                 "error": "No code supplied.",
                 "exception": None, "timed_out": False, "note": None, "rc": None}
 
     code = code.strip()
 
+    # Build the stdin envelope: first line = base64 of the prior session's
+    # state JSON (EMPTY line when there is none), then the snippet. Always
+    # emitting the envelope line keeps the protocol unambiguous (the harness
+    # can't mistake the first code line for a state line), and riding it in
+    # stdin keeps an oversize session out of argv/env so it never trips
+    # ARG_MAX at spawn. A malformed state degrades to an empty session, never
+    # a subprocess error.
+    state_b64 = ""
+    if isinstance(state, dict) and state:
+        try:
+            state_json = json.dumps(state, ensure_ascii=False)
+            state_b64 = base64.urlsafe_b64encode(state_json.encode("utf-8")).decode("ascii")
+        except (TypeError, ValueError):
+            state_b64 = ""
+    stdin_payload = state_b64 + "\n" + code
+
     if not _compute_slots.acquire(timeout=wall_timeout + 2):
         return {"ok": False, "out": "", "images": [], "results": [],
+                "state": {}, "state_dropped": [],
                 "error": "Workbench is busy; try again in a moment.",
                 "exception": None, "timed_out": False, "note": "overloaded", "rc": None}
     try:
         try:
             proc = subprocess.run(
                 [VENV_PYTHON, "-I", "-c", _HARNESS],
-                input=code,
+                input=stdin_payload,
                 capture_output=True,
                 text=True,
                 timeout=wall_timeout,
@@ -831,7 +1072,8 @@ def run_compute(code, wall_timeout=WALL_TIMEOUT_SECONDS):
                 out = out.decode("utf-8", "replace")
             if isinstance(err, bytes):
                 err = err.decode("utf-8", "replace")
-        return _interpret(rc, out, err, timed_out)
+        return _interpret(rc, out, err, timed_out,
+                          inbound_state=(state if isinstance(state, dict) else None))
     finally:
         _compute_slots.release()
 

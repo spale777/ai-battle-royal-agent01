@@ -35,7 +35,7 @@
 
 <section>
     <h2>Python Workbench</h2>
-    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images, or <code>show(value)</code> to surface a number, list, or table of rows so the result renders as a table. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples.</p>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images, or <code>show(value)</code> to surface a number, list, or table of rows so the result renders as a table. <strong>It&rsquo;s a session, not a one-shot</strong> &mdash; the variables you define (data, dicts, dates) are remembered and available to your next snippet, like a REPL; non-persistable things (functions, sets) are dropped and named instead of lost silently. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples.</p>
     <div class="compute-examples" id="compute-examples"></div>
     <div class="compute-wrap">
         <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
@@ -53,6 +53,14 @@ plt.plot(xs, ys); plt.show()  # returns an image">print(sum(range(1, 101)))</tex
             <input type="text" id="compute-share-url" readonly class="compute-share-input" aria-label="Shareable workbench link">
             <button id="compute-share-copy" class="btn-ghost" type="button">Copy</button>
             <span class="compute-share-note" id="compute-share-note"></span>
+        </div>
+        <div class="compute-memory" id="compute-memory" hidden>
+            <span class="compute-memory-head">
+                <span class="compute-memory-label">Session memory</span>
+                <span class="compute-memory-count" id="compute-memory-count"></span>
+                <button id="compute-memory-clear" class="btn-ghost compute-memory-clear" type="button" title="Drop all session variables and start fresh">Clear</button>
+            </span>
+            <span class="compute-memory-names" id="compute-memory-names"></span>
         </div>
     </div>
     <div class="compute-restore-notice" id="compute-restore-notice" hidden></div>
@@ -576,6 +584,62 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
+// --- Session memory: carry data variables across runs (the workbench is a
+//     REPL, not a one-shot) ---------------------------------------------------
+// State is client-carried: it is sent to the server with each run (so a snippet
+// can reference the previous run's variables) and the next run's state is stored
+// back in this browser's localStorage. The server holds nothing between runs, so
+// the session is private to this browser and a public endpoint keeps no user
+// data. Non-persistable names (functions, sets, bytes, NaN/inf) never carry
+// forward -- the server reports them by name so nothing is lost silently.
+const STATE_KEY = 'a01_workbench_state_v1';
+let computeState = loadComputeState();
+
+function loadComputeState() {
+    try {
+        const raw = localStorage.getItem(STATE_KEY);
+        const s = raw ? JSON.parse(raw) : {};
+        return (s && typeof s === 'object' && !Array.isArray(s)) ? s : {};
+    } catch (e) { return {}; }
+}
+
+function saveComputeState(s) {
+    try {
+        if (!s || !Object.keys(s).length) { localStorage.removeItem(STATE_KEY); }
+        else { localStorage.setItem(STATE_KEY, JSON.stringify(s)); }
+    } catch (e) { /* storage blocked/full: the session still works in-memory */ }
+}
+
+function updateMemoryPanel(state, dropped) {
+    const panel = document.getElementById('compute-memory');
+    const count = document.getElementById('compute-memory-count');
+    const names = document.getElementById('compute-memory-names');
+    const keys = (state && typeof state === 'object') ? Object.keys(state) : [];
+    const drop = (dropped && dropped.length) ? dropped : [];
+    if (!keys.length && !drop.length) { panel.hidden = true; return; }
+    panel.hidden = false;
+    count.textContent = keys.length ? (keys.length + (keys.length === 1 ? ' variable' : ' variables') + ' in scope') : '';
+    let text = keys.join(', ');
+    if (drop.length) text += (text ? '   \u00b7   ' : '') + 'not carried: ' + drop.join(', ');
+    names.textContent = text;
+}
+
+function clearComputeState() {
+    computeState = {};
+    saveComputeState({});
+    const panel = document.getElementById('compute-memory');
+    if (panel) panel.hidden = true;
+    const names = document.getElementById('compute-memory-names');
+    if (names) names.textContent = '';
+    const count = document.getElementById('compute-memory-count');
+    if (count) count.textContent = '';
+    addLog('Workbench: session memory cleared');
+}
+
+document.getElementById('compute-memory-clear').addEventListener('click', clearComputeState);
+// Show a restored session (from this browser's localStorage) on load.
+updateMemoryPanel(computeState, []);
+
 async function runCompute() {
     if (computeRunning) return;
     const code = computeCode.value;
@@ -589,10 +653,17 @@ async function runCompute() {
         const res = await fetch('/api/compute', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({code: code})
+            body: JSON.stringify({code: code, state: computeState})
         });
         const r = await res.json();
         const ms = Math.round(performance.now() - t0);
+        // Adopt the next run's session state (the server echoes back exactly
+        // what carries forward) and persist it for the next run / next visit.
+        if (res.ok && r && r.state) {
+            computeState = r.state;
+            saveComputeState(computeState);
+        }
+        updateMemoryPanel(r && r.state, r && r.state_dropped);
         renderComputeResult(r);
         computeStatus.textContent = (r.ok ? '✓ done' : (r.timed_out ? '⏱ killed' : '✖ error')) + ' · ' + ms + ' ms';
         if (r.ok) syncComputeUrl(code);
