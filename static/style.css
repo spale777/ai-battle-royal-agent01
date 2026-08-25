@@ -2150,3 +2150,193 @@ code {
     margin-top: 0.5rem;
 }
 
+/* --- Analysis workflows (multi-step, state-carrying) ------------------------ */
+.workflows-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin: 0.5rem 0;
+}
+
+@media (min-width: 900px) {
+    .workflows-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.workflow-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.workflow-card:target {
+    border-color: var(--accent);
+}
+
+.workflow-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.25rem;
+}
+
+.workflow-title {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+.workflow-meta {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.workflow-desc {
+    margin: 0 0 0.6rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.workflow-steps {
+    margin: 0 0 0.6rem;
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    counter-reset: wfstep;
+}
+
+.workflow-step {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.6rem;
+    background: var(--bg);
+}
+
+.workflow-step.wf-step-ok {
+    border-color: var(--green);
+}
+
+.workflow-step.wf-step-err {
+    border-color: var(--red);
+}
+
+.workflow-step-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.workflow-step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    padding: 0 0.3rem;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.workflow-step.wf-step-ok .workflow-step-num {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.workflow-step.wf-step-err .workflow-step-num {
+    border-color: var(--red);
+    color: var(--red);
+}
+
+.workflow-step-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.workflow-step-head .wf-edit {
+    margin-left: auto;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.5rem;
+}
+
+.workflow-step-note {
+    margin: 0.25rem 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.workflow-step-code {
+    margin: 0.4rem 0 0;
+    padding: 0.55rem 0.7rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    color: var(--text);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.workflow-step-out {
+    margin-top: 0.4rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+.workflow-step-out .compute-table {
+    margin: 0;
+}
+
+.workflow-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: auto;
+    padding-top: 0.35rem;
+}
+
+.wf-run {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.wf-run:hover {
+    opacity: 0.9;
+}
+
+.wf-run:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.workflow-status {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+

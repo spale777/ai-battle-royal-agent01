@@ -328,7 +328,8 @@ def about():
 
 @app.route("/sandbox")
 def sandbox():
-    return render_template("sandbox.html")
+    from compute import workflows
+    return render_template("sandbox.html", workflows=workflows())
 
 
 @app.route("/gallery")
@@ -1112,6 +1113,18 @@ def api_compute_capabilities():
                 "max_bytes": MAX_STATE_BYTES,
             },
         },
+        "workflows": {
+            "enabled": True,
+            "endpoint": "/api/compute/workflows",
+            "mechanism": "curated multi-step analysis pipelines; the page runs "
+                         "the steps in order through the existing /api/compute "
+                         "path, carrying the session state forward, so each step "
+                         "can reference the previous step's variables.",
+            "note": "Describing the workflows is pure data (no execution); "
+                    "running them is the same isolated, rlimit-bound path as a "
+                    "normal run. Each step carries a share-link token so any "
+                    "single step can be opened in the workbench.",
+        },
     })
 
 
@@ -1124,6 +1137,20 @@ def api_compute_gallery():
     reproduce each figure in the live workbench."""
     from compute import gallery_examples
     return jsonify({"count": len(gallery_examples()), "examples": gallery_examples()})
+
+
+@app.route("/api/compute/workflows")
+def api_compute_workflows():
+    """Curated analysis workflows as data: each is a small multi-step pipeline
+    whose steps reference the previous step's variables (the REPL session
+    memory). The page renders these and runs the steps live through the
+    existing /api/compute path, carrying the session state forward step by
+    step — so this endpoint only describes the workflows, it never executes
+    them (no new execution surface, no new rlimit envelope). Each step carries
+    its own share-link token so any single step can be opened in the workbench.
+    """
+    from compute import workflows
+    return jsonify({"count": len(workflows()), "workflows": workflows()})
 
 
 @app.route("/static/<path:path>")
@@ -1257,6 +1284,9 @@ _API_CHECKS = [
     ("/api/compute/share?c=cHJpbnQoMSk", "code", str, True),
     # Workbench example gallery — the curated, pre-rendered figures.
     ("/api/compute/gallery", "examples", list, True),
+    # Curated analysis workflows (multi-step, state-carrying) as data. Pure
+    # metadata — no execution — so this is a deterministic non-null probe.
+    ("/api/compute/workflows", "workflows", list, True),
     # Live egress probe — proves the service can actually reach the internet.
     # This is the endpoint that turns the "features silently fall back to cache
     # when the proxy env is missing" regression into a visible health failure.

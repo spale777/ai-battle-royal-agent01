@@ -876,6 +876,234 @@ def gallery_examples():
     return out
 
 
+# --- Curated analysis workflows (multi-step, state-carrying) ------------------
+# Where the gallery shows ONE snippet, a workflow shows a SEQUENCE: a small
+# analysis pipeline where each step references the variables defined by the
+# previous step (the REPL session memory). The steps run live in the workbench
+# (the same isolated /api/compute path — no new execution surface); the client
+# simply POSTs the steps in order, carrying the session state forward, so a
+# visitor sees the full load -> transform -> analyze -> plot loop, and can edit
+# or fork any step. Every step is deterministic (fixed seeds / pure math) and
+# uses only the sandbox's pre-loaded modules + restricted plt.
+WORKFLOWS = [
+    {
+        "key": "eda",
+        "title": "Explore a sample, step by step",
+        "description": (
+            "A classic exploratory pass over one seeded sample: generate it, "
+            "look at its shape, check it for a drift, then collect the numbers "
+            "into a report. Each step only reads the variables the previous "
+            "step defined — that is the point."
+        ),
+        "steps": [
+            {
+                "name": "Generate the sample",
+                "note": "Define `sample` (seeded, so it is identical every run).",
+                "code": (
+                    "random.seed(11)\n"
+                    "sample = [random.gauss(0, 1) for _ in range(2000)]\n"
+                    "show({'n': len(sample), 'mean': round(statistics.mean(sample), 3),\n"
+                    "      'std': round(statistics.pstdev(sample), 3)})"
+                ),
+            },
+            {
+                "name": "Look at the shape",
+                "note": "Plot the `sample` from step 1; report its quartiles.",
+                "code": (
+                    "s = sorted(sample)\n"
+                    "q1, med, q3 = s[len(s)//4], s[len(s)//2], s[3*len(s)//4]\n"
+                    "plt.hist(sample, bins=40)\n"
+                    "plt.title('Step 1\\'s sample, n=%d' % len(sample))\n"
+                    "plt.xlabel('value'); plt.ylabel('count'); plt.grid(True, alpha=0.3)\n"
+                    "plt.show()\n"
+                    "show({'q1': round(q1, 3), 'median': round(med, 3), 'q3': round(q3, 3)})"
+                ),
+            },
+            {
+                "name": "Check for drift",
+                "note": "Compare the first half of `sample` to its second half.",
+                "code": (
+                    "half = len(sample) // 2\n"
+                    "first, second = statistics.mean(sample[:half]), statistics.mean(sample[half:])\n"
+                    "d = second - first\n"
+                    "show({'mean(first half)': round(first, 3), 'mean(second half)': round(second, 3),\n"
+                    "      'difference': round(d, 4),\n"
+                    "      'reading': 'drift' if abs(d) > 0.05 else 'stable (within noise)'})"
+                ),
+            },
+            {
+                "name": "Collect the report",
+                "note": "Gather everything computed so far into one table of rows.",
+                "code": (
+                    "show([['n', len(sample)],\n"
+                    "       ['mean', round(statistics.mean(sample), 3)],\n"
+                    "       ['std', round(statistics.pstdev(sample), 3)],\n"
+                    "       ['min', round(min(sample), 3)],\n"
+                    "       ['max', round(max(sample), 3)]])"
+                ),
+            },
+        ],
+    },
+    {
+        "key": "primes",
+        "title": "Primes to 1000: sieve, gaps, twins",
+        "description": (
+            "Run a sieve, then interrogate what comes out: the spacing between "
+            "primes, the twin-prime pairs, and the density by bucket. The steps "
+            "each build on the `primes` list from step 1."
+        ),
+        "steps": [
+            {
+                "name": "Sieve to 1000",
+                "note": "Define `primes`; show the first ten and the count.",
+                "code": (
+                    "limit = 1000\n"
+                    "sieve = [True] * (limit + 1)\n"
+                    "sieve[0] = sieve[1] = False\n"
+                    "for p in range(2, int(limit ** 0.5) + 1):\n"
+                    "    if sieve[p]:\n"
+                    "        for m in range(p * p, limit + 1, p):\n"
+                    "            sieve[m] = False\n"
+                    "primes = [n for n, ok in enumerate(sieve) if ok]\n"
+                    "show({'count': len(primes), 'first 10': primes[:10], 'last': primes[-1]})"
+                ),
+            },
+            {
+                "name": "Gap distribution",
+                "note": "How often does each prime-gap size occur?",
+                "code": (
+                    "gaps = [b - a for a, b in zip(primes, primes[1:])]\n"
+                    "counts = collections.Counter(gaps)\n"
+                    "rows = [[g, counts[g]] for g in sorted(counts)]\n"
+                    "show(rows)"
+                ),
+            },
+            {
+                "name": "Twin primes",
+                "note": "Pairs whose gap is 2, out of the 168 primes.",
+                "code": (
+                    "twins = [(a, b) for a, b in zip(primes, primes[1:]) if b - a == 2]\n"
+                    "show({'twin pairs': len(twins),\n"
+                    "      'first 5': [[a, b] for a, b in twins[:5]],\n"
+                    "      'last': list(twins[-1]) if twins else None})"
+                ),
+            },
+            {
+                "name": "Density by bucket",
+                "note": "Plot the `primes` from step 1 in 100-wide buckets.",
+                "code": (
+                    "buckets = [sum(1 for p in primes if lo <= p < hi)\n"
+                    "           for lo, hi in [(i, i + 100) for i in range(0, 1000, 100)]]\n"
+                    "labels = ['1-100', '101-200', '201-300', '301-400', '401-500',\n"
+                    "          '501-600', '601-700', '701-800', '801-900', '901-1000']\n"
+                    "plt.bar(range(len(buckets)), buckets, color='tab:orange')\n"
+                    "plt.xticks(range(len(buckets)), labels, rotation=45, ha='right')\n"
+                    "plt.title('Primes per 100, from 1 to 1000'); plt.ylabel('count')\n"
+                    "plt.grid(True, axis='y', alpha=0.3)\n"
+                    "plt.show()\n"
+                    "print('total primes:', sum(buckets))"
+                ),
+            },
+        ],
+    },
+    {
+        "key": "zeta",
+        "title": "Watch 1/n² converge to π²/6",
+        "description": (
+            "Build the partial sums of the Basel series, measure the error "
+            "against π²/6, plot the convergence, and estimate how fast the "
+            "error decays. Each step reuses what the last one computed."
+        ),
+        "steps": [
+            {
+                "name": "Partial sums",
+                "note": "Define `n_list` and `partial` (the running totals).",
+                "code": (
+                    "n_list = list(range(1, 201))\n"
+                    "partial = []\n"
+                    "total = 0.0\n"
+                    "for n in n_list:\n"
+                    "    total += 1.0 / (n * n)\n"
+                    "    partial.append(total)\n"
+                    "show({'terms': len(n_list), 'partial sum at n=200': round(partial[-1], 6)})"
+                ),
+            },
+            {
+                "name": "Error vs π²/6",
+                "note": "Track the gap to the known limit, π²/6 ≈ 1.644934.",
+                "code": (
+                    "target = math.pi ** 2 / 6\n"
+                    "errs = [target - p for p in partial]\n"
+                    "show([['n', n, round(partial[n-1], 6), round(errs[n-1], 6)]\n"
+                    "       for n in [1, 10, 50, 100, 200]])"
+                ),
+            },
+            {
+                "name": "Plot the convergence",
+                "note": "The partial sums (step 1) against the limit line.",
+                "code": (
+                    "plt.plot(n_list, partial, color='tab:blue')\n"
+                    "plt.plot(n_list, [target] * len(n_list), color='tab:red', linestyle='--')\n"
+                    "plt.title('Partial sums of 1/n^2 vs pi^2/6')\n"
+                    "plt.xlabel('n'); plt.ylabel('partial sum')\n"
+                    "plt.grid(True, alpha=0.3)\n"
+                    "plt.show()\n"
+                    "print('limit pi^2/6 =', round(target, 6))"
+                ),
+            },
+            {
+                "name": "How fast?",
+                "note": "Fit the slope of log(error) vs log(n) — the decay rate.",
+                "code": (
+                    "pts = [(n, errs[n-1]) for n in [10, 50, 100, 200]]\n"
+                    "logn = [math.log(n) for n, _ in pts]\n"
+                    "loge = [math.log(e) for _, e in pts]\n"
+                    "bar = lambda xs: sum(xs) / len(xs)\n"
+                    "slope = (sum((x - bar(logn)) * (y - bar(loge)) for x, y in zip(logn, loge))\n"
+                    "         / sum((x - bar(logn)) ** 2 for x in logn))\n"
+                    "show({'estimated rate': 'error ~ n^%.2f' % (-slope),\n"
+                    "      'theory': 'error ~ 1/n  (slope -1.0)',\n"
+                    "      'residual at n=200': round(errs[199], 6)})"
+                ),
+            },
+        ],
+    },
+]
+
+
+def workflows():
+    """The curated analysis workflows as data: metadata + each step's code +
+    its share-link token (so any single step can be opened in the workbench).
+    Pure and deterministic — no matplotlib, no file I/O — so it is cheap to call
+    per request and trivial to test. The steps are run client-side through the
+    existing /api/compute path (state carried forward), so this function never
+    executes them; it only describes them.
+    """
+    out = []
+    for wf in WORKFLOWS:
+        steps = []
+        for i, st in enumerate(wf["steps"], 1):
+            token = encode_share(st["code"])
+            steps.append({
+                "index": i,
+                "name": st["name"],
+                "note": st["note"],
+                "code": st["code"],
+                "token": token,
+                "chars": len(st["code"].strip()),
+                "workbench": "/sandbox#c=" + (token or ""),
+            })
+        out.append({
+            "key": wf["key"],
+            "title": wf["title"],
+            "description": wf["description"],
+            "step_count": len(wf["steps"]),
+            "steps": steps,
+            "deep_link": "/sandbox#w=" + wf["key"],
+        })
+    return out
+
+
 def encode_share(code):
     """Encode a snippet into a URL-safe token for a shareable workbench link.
 

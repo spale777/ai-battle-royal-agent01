@@ -35,7 +35,7 @@
 
 <section>
     <h2>Python Workbench</h2>
-    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images, or <code>show(value)</code> to surface a number, list, or table of rows so the result renders as a table. <strong>It&rsquo;s a session, not a one-shot</strong> &mdash; the variables you define (data, dicts, dates) are remembered and available to your next snippet, like a REPL; non-persistable things (functions, sets) are dropped and named instead of lost silently. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples.</p>
+    <p class="section-desc">Run real Python on the server. Snippets execute in an isolated subprocess under hard OS limits (CPU time, memory, no file writes, no <code>import</code>/<code>open</code>/<code>eval</code>). Safe modules are pre-loaded: <code>math, random, statistics, collections, itertools, string, textwrap, fractions, decimal, functools, json, re, datetime, time</code> &mdash; and a restricted <code>plt</code> (matplotlib) for plotting computed results. Call <code>plt.show()</code> to return your figures as images, or <code>show(value)</code> to surface a number, list, or table of rows so the result renders as a table. <strong>It&rsquo;s a session, not a one-shot</strong> &mdash; the variables you define (data, dicts, dates) are remembered and available to your next snippet, like a REPL; non-persistable things (functions, sets) are dropped and named instead of lost silently. <strong>Any session is a shareable link</strong> &mdash; &ldquo;Copy share link&rdquo; encodes the snippet into the URL, so the link reproduces the code and re-runs it. See <a href="/gallery">the gallery</a> for ready-made examples, or <a href="#workflows">run a multi-step analysis workflow</a> below &mdash; a pipeline where each step reads the variables the last one defined.</p>
     <div class="compute-examples" id="compute-examples"></div>
     <div class="compute-wrap">
         <textarea id="compute-code" rows="6" spellcheck="false" placeholder="# Safe modules are pre-loaded as globals (no import needed):
@@ -82,6 +82,50 @@ plt.plot(xs, ys); plt.show()  # returns an image">print(sum(range(1, 101)))</tex
         (number, list, or table of rows) as a structured result; it is bounded and
         degrades anything unrepresentable to a short <code>repr</code> &mdash; it
         never reads a file.
+    </div>
+</section>
+
+<section id="workflows">
+    <h2>Analysis Workflows</h2>
+    <p class="section-desc">Ready-made <strong>multi-step analyses</strong> that show the workbench at its best: a pipeline where each step <em>reads the variables the previous step defined</em> (the session memory above). Press <strong>Run</strong> and each step executes in order in the isolated sandbox &mdash; the session state carries forward step to step &mdash; and every figure and table is rendered right here. No <code>import</code>s, no files, no network: the same limits as your own snippets. <strong>Edit or fork</strong> any step to load it into the workbench above and change it. A <a href="/gallery">gallery</a> has the one-shot versions.</p>
+    <div class="workflows-grid" id="workflows-grid">
+        {% for wf in workflows %}
+        <div class="workflow-card" id="workflow-{{ wf.key }}" data-wf="{{ wf.key }}">
+            <div class="workflow-head">
+                <h3 class="workflow-title">{{ wf.title }}</h3>
+                <span class="workflow-meta">{{ wf.step_count }} steps</span>
+            </div>
+            <p class="workflow-desc">{{ wf.description }}</p>
+            <ol class="workflow-steps">
+                {% for st in wf.steps %}
+                <li class="workflow-step" data-step="{{ st.index }}">
+                    <div class="workflow-step-head">
+                        <span class="workflow-step-num">{{ st.index }}</span>
+                        <span class="workflow-step-name">{{ st.name }}</span>
+                        <button class="wf-edit btn-ghost" type="button" data-wf="{{ wf.key }}" data-step="{{ st.index }}"
+                                title="Load this exact step into the workbench above and edit it (a fork starts from a fresh session)">Edit</button>
+                    </div>
+                    <div class="workflow-step-note">{{ st.note }}</div>
+                    <pre class="workflow-step-code"><code>{{ st.code }}</code></pre>
+                    <div class="workflow-step-out"></div>
+                </li>
+                {% endfor %}
+            </ol>
+            <div class="workflow-controls">
+                <button class="wf-run" type="button" data-wf="{{ wf.key }}">Run workflow</button>
+                <span class="workflow-status" data-wf-status="{{ wf.key }}"></span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="compute-cap-note">
+        <strong>How a workflow runs.</strong> The steps are not a single program &mdash; each one is a
+        separate sandboxed run, and the session (the data variables) is carried forward between them,
+        exactly like typing snippets into the workbench one at a time. That is what lets step 2 plot
+        <code>sample</code> and step 3 measure <code>primes</code> without redefining anything.
+        &ldquo;Edit&rdquo; on a step loads that step&rsquo;s code into the workbench above with a <em>fresh</em>
+        session, so a fork is a clean starting point you can change &mdash; the workflow itself is curated
+        code and is not re-run when you edit a step.
     </div>
 </section>
 
@@ -475,7 +519,11 @@ function renderResults(results) {
     return html;
 }
 
-function renderComputeResult(r) {
+// Build the full output HTML for one run: printed text, structured results,
+// figures, and the ok/timed-out/error notice. Shared by the main workbench
+// output and the per-step output of a workflow, so a workflow step renders
+// EXACTLY like a normal run.
+function buildResultHtml(r) {
     let html = '';
     const out = (r.out || '').trim();
     if (out) html += '<pre class="compute-out-block">' + escapeHtml(out) + '</pre>';
@@ -505,19 +553,24 @@ function renderComputeResult(r) {
             html += '<details class="compute-tb"><summary>full traceback</summary><pre>' + escapeHtml(r.error) + '</pre></details>';
         }
     }
-    computeOut.innerHTML = html || '<div class="compute-msg">(no output)</div>';
-    // click a figure to zoom / reset
-    computeOut.querySelectorAll('.compute-image').forEach(function (img) {
+    return html || '<div class="compute-msg">(no output)</div>';
+}
+
+// Wire the interactive bits of a rendered result block: click-to-zoom on
+// figures, Download a figure (the data-URL is already in the DOM, so pure
+// client-side), and Copy JSON on a structured result. `results` is the API's
+// results array (so Copy JSON returns exactly what the run produced).
+function wireResultEl(el, results) {
+    if (!el) return;
+    el.querySelectorAll('.compute-image').forEach(function (img) {
         img.addEventListener('click', function () {
             img.classList.toggle('zoomed');
         });
     });
-    // Download a figure: the image is already a PNG data-URL in the DOM, so this
-    // is pure client-side — no server file, no new endpoint, CSP unchanged.
-    computeOut.querySelectorAll('.compute-dl').forEach(function (btn) {
+    el.querySelectorAll('.compute-dl').forEach(function (btn) {
         btn.addEventListener('click', function () {
             const idx = parseInt(btn.getAttribute('data-fidx'), 10) || 0;
-            const img = computeOut.querySelectorAll('.compute-image')[idx];
+            const img = el.querySelectorAll('.compute-image')[idx];
             if (!img || !img.src) return;
             downloadDataUrl(img.src, 'workbench-figure-' + (idx + 1) + '.png');
             const old = btn.textContent;
@@ -526,12 +579,10 @@ function renderComputeResult(r) {
             setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1600);
         });
     });
-    // Copy a structured result as JSON: the serialized value is already in the
-    // API response, so what is copied is exactly what the workbench returned.
-    computeOut.querySelectorAll('.compute-copy-json').forEach(function (btn) {
+    el.querySelectorAll('.compute-copy-json').forEach(function (btn) {
         btn.addEventListener('click', function () {
             const idx = parseInt(btn.getAttribute('data-ridx'), 10) || 0;
-            const val = (r.results && r.results[idx] !== undefined) ? r.results[idx] : null;
+            const val = (results && results[idx] !== undefined) ? results[idx] : null;
             copyText(JSON.stringify(val));
             const old = btn.textContent;
             btn.textContent = 'Copied ✓';
@@ -539,6 +590,11 @@ function renderComputeResult(r) {
             setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1600);
         });
     });
+}
+
+function renderComputeResult(r) {
+    computeOut.innerHTML = buildResultHtml(r);
+    wireResultEl(computeOut, r && r.results);
 }
 
 // Trigger a browser download of a data-URL (the figures we get back are already
@@ -944,5 +1000,150 @@ if (computeExamples) {
         });
     });
 }
+
+// --- Analysis workflows: curated multi-step pipelines that run in the
+//     workbench, with the session state carried forward step to step ---------
+// The steps are curated code rendered server-side; the client just POSTs them
+// in order through the same /api/compute path (carrying `state` forward) and
+// renders each step's result with the EXACT same renderer as a normal run. No
+// new execution surface, no new endpoint — depth on the existing workbench.
+function wfSteps(wfKey) {
+    const card = document.getElementById('workflow-' + wfKey);
+    if (!card) return [];
+    return Array.prototype.map.call(
+        card.querySelectorAll('.workflow-step'),
+        function (li) { return li; }
+    );
+}
+
+function wfStatusEl(wfKey) {
+    return document.querySelector('[data-wf-status="' + wfKey + '"]');
+}
+
+function renderStepResult(li, r) {
+    const outEl = li.querySelector('.workflow-step-out');
+    if (!outEl) return;
+    outEl.innerHTML = buildResultHtml(r);
+    wireResultEl(outEl, r && r.results);
+    li.classList.toggle('wf-step-ok', !!r.ok);
+    li.classList.toggle('wf-step-err', !r.ok);
+}
+
+function clearWorkflowOutputs(wfKey) {
+    wfSteps(wfKey).forEach(function (li) {
+        const outEl = li.querySelector('.workflow-step-out');
+        if (outEl) outEl.innerHTML = '';
+        li.classList.remove('wf-step-ok', 'wf-step-err');
+    });
+}
+
+let wfRunning = false;
+
+async function runWorkflow(wfKey) {
+    if (wfRunning) return;
+    const steps = wfSteps(wfKey);
+    if (!steps.length) return;
+    // Find each step's code from its rendered <code> block (server-rendered, so
+    // it is byte-exact — no re-encoding needed on the client).
+    const codes = steps.map(function (li) {
+        const codeEl = li.querySelector('.workflow-step-code code');
+        return codeEl ? codeEl.textContent : '';
+    });
+    wfRunning = true;
+    const status = wfStatusEl(wfKey);
+    const runBtn = document.querySelector('.wf-run[data-wf="' + wfKey + '"]');
+    if (runBtn) runBtn.disabled = true;
+    clearWorkflowOutputs(wfKey);
+    let state = {};
+    let okCount = 0;
+    try {
+        for (let i = 0; i < codes.length; i++) {
+            if (status) status.textContent = 'step ' + (i + 1) + ' of ' + codes.length + '…';
+            const code = codes[i].trim();
+            if (!code) {
+                renderStepResult(steps[i], {ok: false, error: 'Step has no code.'});
+                break;
+            }
+            let res, r;
+            try {
+                res = await fetch('/api/compute', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({code: code, state: state})
+                });
+                r = await res.json();
+            } catch (e) {
+                r = {ok: false, error: 'Could not reach the workbench: ' + String(e)};
+            }
+            renderStepResult(steps[i], r);
+            if (r.ok) {
+                okCount++;
+                // Carry the session forward to the next step (this is the whole
+                // point of a workflow — step i+1 reads step i's variables).
+                state = (r && r.state) ? r.state : state;
+            } else {
+                // Stop at the first failing step; the remaining steps depend on
+                // this one's variables, so running them would be misleading.
+                if (status) status.textContent = 'stopped at step ' + (i + 1);
+                break;
+            }
+        }
+        if (status) status.textContent = okCount === codes.length
+            ? '✓ ' + okCount + ' of ' + codes.length + ' steps'
+            : (okCount + ' of ' + codes.length + ' steps completed');
+        addLog('Workflow "' + wfKey + '": ' + okCount + '/' + codes.length + ' steps', okCount === codes.length ? '' : 'warn');
+    } finally {
+        wfRunning = false;
+        if (runBtn) runBtn.disabled = false;
+    }
+}
+
+// "Edit" on a step: fork it into the workbench above with a FRESH session, so
+// the visitor can modify it and re-run. (A workflow step assumes prior steps'
+// variables; a fresh session is the honest fork — the step's code is what gets
+// edited, and the visitor can re-run the workflow or type follow-ups.)
+function forkStep(wfKey, stepIndex) {
+    const li = document.querySelector('#workflow-' + wfKey + ' .workflow-step[data-step="' + stepIndex + '"]');
+    if (!li) return;
+    const codeEl = li.querySelector('.workflow-step-code code');
+    if (!codeEl) return;
+    computeCode.value = codeEl.textContent;
+    clearComputeState();
+    computeOut.innerHTML = '<div class="compute-msg note">Step ' + stepIndex + ' loaded with a fresh session — edit it and press Run. (This step normally reads variables from earlier steps; run those first, or redefine what it needs.)</div>';
+    addLog('Workflow: forked step ' + stepIndex + ' of "' + wfKey + '" into the workbench (fresh session)');
+    computeCode.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+(function initWorkflows() {
+    const grid = document.getElementById('workflows-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.wf-run').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const wf = btn.getAttribute('data-wf');
+            if (wf) runWorkflow(wf);
+        });
+    });
+    grid.querySelectorAll('.wf-edit').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const wf = btn.getAttribute('data-wf');
+            const step = parseInt(btn.getAttribute('data-step'), 10);
+            if (wf) forkStep(wf, step);
+        });
+    });
+    // Deep link: /sandbox#w=<key> scrolls to a workflow and runs it, so a
+    // specific analysis is shareable (the fragment is client-side; the server
+    // never sees it, matching the #c= share links).
+    const m = (location.hash || '').match(/^#w=([\w-]+)/);
+    if (m) {
+        const wf = m[1];
+        const card = document.getElementById('workflow-' + wf);
+        if (card) {
+            setTimeout(function () {
+                card.scrollIntoView({behavior: 'smooth', block: 'start'});
+                runWorkflow(wf);
+            }, 250);
+        }
+    }
+})();
 </script>
 {% endblock %}
