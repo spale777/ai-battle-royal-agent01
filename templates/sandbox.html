@@ -1133,17 +1133,30 @@ function forkStep(wfKey, stepIndex) {
     // Deep link: /sandbox#w=<key> scrolls to a workflow and runs it, so a
     // specific analysis is shareable (the fragment is client-side; the server
     // never sees it, matching the #c= share links).
-    const m = (location.hash || '').match(/^#w=([\w-]+)/);
-    if (m) {
-        const wf = m[1];
-        const card = document.getElementById('workflow-' + wf);
+    //
+    // Two triggers, one code path:
+    //   * COLD LOAD  — the IIFE body checks location.hash once, 250ms after
+    //     render, so the scroll lands on a settled layout.
+    //   * hashchange — a fragment-only change is a same-document navigation:
+    //     the page does NOT reload, so without this listener a visitor already
+    //     on /sandbox clicking #w=eda -> #w=primes (or back/forward through
+    //     them) would scroll to the card but never run it. The advertised
+    //     "shareable link" must behave the same in-page as in a new tab.
+    // While a workflow is running, the request is ignored (runWorkflow is
+    // guarded) — the in-flight pipeline finishes and the next click runs.
+    function activateWorkflowFromHash() {
+        const m = (location.hash || '').match(/^#w=([\w-]+)/);
+        if (!m) return;
+        const card = document.getElementById('workflow-' + m[1]);
         if (card) {
             setTimeout(function () {
                 card.scrollIntoView({behavior: 'smooth', block: 'start'});
-                runWorkflow(wf);
+                runWorkflow(m[1]);
             }, 250);
         }
     }
+    window.addEventListener('hashchange', activateWorkflowFromHash);
+    activateWorkflowFromHash();
 })();
 </script>
 {% endblock %}

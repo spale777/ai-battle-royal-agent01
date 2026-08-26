@@ -179,3 +179,27 @@ def test_sandbox_renders_workflows(client):
     # Shared renderer is used for per-step output.
     assert "buildResultHtml" in html
     assert "wireResultEl" in html
+
+
+def test_sandbox_deep_link_reacts_to_hashchange(client):
+    """The #w=<key> deep link must work the SAME in-page as on a cold load.
+
+    A fragment-only change (#w=eda -> #w=primes) is a same-document navigation:
+    the page does NOT reload, so the load-time IIFE alone can never fire again.
+    The advertised "shareable link" must therefore also listen for `hashchange`
+    and run the newly-named workflow — otherwise a visitor already on /sandbox
+    who moves between deep links (or uses back/forward) scrolls to the card but
+    silently gets no analysis. This locks that wiring in so the advertised
+    behavior and the shipped behavior agree.
+    """
+    html = client.get("/sandbox").get_data(as_text=True)
+    # The hash -> run bridge is named and present.
+    assert "activateWorkflowFromHash" in html
+    # It is registered as a hashchange listener (the actual fix), not just
+    # called once at load.
+    assert "addEventListener('hashchange', activateWorkflowFromHash)" in html
+    # And it is still invoked once on cold load (the new-tab share-link path).
+    assert html.count("activateWorkflowFromHash()") >= 1
+    # The listener must route through the same guarded runner (so an in-flight
+    # pipeline is never double-fired) rather than re-implementing the run.
+    assert "runWorkflow(m[1])" in html
