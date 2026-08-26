@@ -55,6 +55,7 @@ this can be; we do not pretend otherwise.
 
 import base64
 import datetime
+import inspect
 import json
 import math
 import os
@@ -107,6 +108,38 @@ MAX_STATE_DEPTH = 40          # nesting depth (list/dict) before we stop
 MAX_STATE_ITEMS = 20000       # max elements kept across ALL containers
 MAX_STATE_KEYS = 2000         # max keys kept across ALL dicts
 MAX_STATE_BYTES = 512 * 1024  # max size of the whole session's JSON (in or out)
+
+# --- Canonical tick handling (single source of truth for BOTH render paths) ---
+# The workbench has two ways a snippet reaches matplotlib: the live sandbox
+# child (this file's _HARNESS_SOURCE template) and the gallery build
+# (render_gallery_png, which runs curated snippets in-process). Historically
+# they each wrapped ax.set_xticks a different way, and the divergence bit us
+# once: a curated workflow plotted 11 bars against 10 labels, which the child's
+# shim passed as set_xticks(ticks, labels) — an error on the positionals — while
+# the gallery's shim happened to accept the same call. To make the two paths
+# un-driftable, _canonical_ticks() below is the ONLY tick logic in the codebase:
+# the gallery path calls it directly, and the child gets a VERBATIM copy of its
+# source spliced into _HARNESS at import time (see the @_CANONICAL_TICKS@
+# placeholder), so "what the child does" is defined by what the parent does —
+# tested, not assumed.
+#
+# The rule: set the tick POSITIONS always, but apply the labels only when their
+# count matches. A mismatch (a snippet's honest data/label slip) degrades to the
+# default numeric labels instead of crashing the whole run — the figure still
+# renders, and the visitor sees a chart rather than a traceback.
+def _canonical_ticks(ticks, labels=None):
+    """Normalize a (ticks, labels) pair into positional args for ax.set_xticks.
+
+    `ticks` is a sequence of tick positions; `labels` (optional) the labels to
+    show at those positions. Returns (ticks,) when labels are absent or their
+    count does not match the ticks (matplotlib's own rule for the positionals),
+    and (ticks, labels) when the counts agree. Pure: no matplotlib import.
+    """
+    ticks = list(ticks)
+    if labels is not None and len(list(labels)) == len(ticks):
+        return ticks, list(labels)
+    return (ticks,)
+
 
 # The child interpreter runs isolated (-I) and executes this harness. User code
 # is read from stdin. A single JSON line is written to stderr so the parent can
@@ -259,14 +292,22 @@ def _set_ylabel(label, *args, **kwargs):
         return _plt_figures[-1][1].set_ylabel(label, *args, **kwargs)
 
 
+# --- Tick handling. The line below is a placeholder the parent replaces at
+# import time with the VERBATIM source of compute._canonical_ticks, so the live
+# sandbox child and the in-process gallery build share ONE tick rule. Do not
+# hand-edit the function here — edit _canonical_ticks() in the parent and this
+# follows. (This comment must not repeat the placeholder token, or the .replace()
+# that splices it in would also rewrite the comment.)
+@_CANONICAL_TICKS@
+
 def _set_xticks(ticks, labels=None, **kwargs):
     if _plt_figures:
-        return _plt_figures[-1][1].set_xticks(ticks, labels, **kwargs)
+        return _plt_figures[-1][1].set_xticks(*_canonical_ticks(ticks, labels), **kwargs)
 
 
 def _set_yticks(ticks, labels=None, **kwargs):
     if _plt_figures:
-        return _plt_figures[-1][1].set_yticks(ticks, labels, **kwargs)
+        return _plt_figures[-1][1].set_yticks(*_canonical_ticks(ticks, labels), **kwargs)
 
 
 def _grid(visible=True, *args, **kwargs):
@@ -646,7 +687,16 @@ _HARNESS = (
     .replace("@STATEITEMS@", str(MAX_STATE_ITEMS))
     .replace("@STATEKEYS@", str(MAX_STATE_KEYS))
     .replace("@STATEBYTES@", str(MAX_STATE_BYTES))
+    # The child's tick logic is generated from the parent's _canonical_ticks
+    # source, so the live sandbox and the gallery build share ONE rule. If the
+    # placeholder is ever removed from the template, this assert fires at import
+    # time instead of silently diverging again.
+    .replace("@_CANONICAL_TICKS@", inspect.getsource(_canonical_ticks))
 )
+# If the splice above silently no-ops (placeholder renamed/removed), the child
+# would ship with a literal @_CANONICAL_TICKS@ token in its source and a NameError
+# at every plot. Fail at import time, not at a visitor's first figure.
+assert "@_CANONICAL_TICKS@" not in _HARNESS, "canonical-ticks splice failed"
 
 _compute_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
 
@@ -832,8 +882,13 @@ def render_gallery_png(code, dpi=FIG_DPI, figsize=(16.0, 12.0)):
         def title(self, *a, **k): return ax.set_title(*a, **k)
         def xlabel(self, *a, **k): return ax.set_xlabel(*a, **k)
         def ylabel(self, *a, **k): return ax.set_ylabel(*a, **k)
-        def xticks(self, *a, **k): return ax.set_xticks(*a, **k)
-        def yticks(self, *a, **k): return ax.set_yticks(*a, **k)
+        # Same (ticks, labels) signature and the SAME _canonical_ticks rule as the
+        # live sandbox child — this is the second of the two render paths, and the
+        # shared rule (see module docstring) is what keeps them from diverging.
+        def xticks(self, ticks, labels=None, **k):
+            return ax.set_xticks(*_canonical_ticks(ticks, labels), **k)
+        def yticks(self, ticks, labels=None, **k):
+            return ax.set_yticks(*_canonical_ticks(ticks, labels), **k)
         def grid(self, *a, **k): return ax.grid(*a, **k)
         def legend(self, *a, **k): return ax.legend(*a, **k)
         def axis(self, *a, **k): return ax.axis(*a, **k)
