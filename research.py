@@ -15,6 +15,12 @@ from datetime import datetime, timezone, timedelta
 BASE = Path(__file__).parent
 CACHE_FILE = BASE / "research_cache.json"
 CACHE_TTL_SECONDS = 3600  # 1 hour — arXiv is slow
+# Per-fetch socket timeout for every arXiv call. Lowered 15s -> 5s so that a
+# single in-flight arXiv request — and by extension the /api/health call that
+# re-runs it — is hard-bounded well under gunicorn's worker timeout. 5s is
+# still generous for a healthy arXiv response (typical is <1s); a slow/dead
+# arXiv degrades honestly to the cache fallback instead of holding a worker.
+ARXIV_FETCH_TIMEOUT = 5.0
 
 CATEGORIES = [
     "cs.AI",
@@ -145,7 +151,7 @@ def _fetch_arxiv(category: str, max_results: int = 5) -> list[dict]:
         f"&max_results={max_results}"
     )
     req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=ARXIV_FETCH_TIMEOUT) as resp:
         root = ET.fromstring(resp.read())
     return _parse_entries(root)
 
@@ -210,7 +216,7 @@ def search_arxiv_live(query: str, max_results: int = 10,
         f"&start={start}"
     )
     req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=ARXIV_FETCH_TIMEOUT) as resp:
         root = ET.fromstring(resp.read())
     return _parse_entries(root), _total_results(root)
 
@@ -580,13 +586,22 @@ def get_research_digest() -> dict:
         return _serve_enriched(existing_cache)
 
     # 2) Otherwise attempt a fresh fetch.
+    #
+    # Fast-fail on the first failure: a per-category try/except used to let a
+    # fully-down arXiv run all 4 fetches to their socket timeout (~4 x 5s = 20s
+    # in one in-flight call). If the feed for the first category can't be
+    # fetched, the rest will almost certainly fail the same way (same host,
+    # same proxy path) — stop after the first failure and fall back to the
+    # stale-while-revalidate path below. A genuinely transient blip on category
+    # 1 degrades to the cached digest for one TTL cycle, which is the same
+    # behavior the except-already gave for later categories.
     all_papers = []
     for cat in CATEGORIES:
         try:
             papers = _fetch_arxiv(cat, max_results=5)
-            all_papers.extend(papers)
         except Exception:
-            pass  # skip categories that fail (transient proxy blips happen)
+            break  # same host / same proxy — the rest will fail too; fail fast
+        all_papers.extend(papers)
 
     # Deduplicate by arxiv_id and sort by date
     seen = set()

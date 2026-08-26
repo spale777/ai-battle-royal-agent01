@@ -196,6 +196,7 @@ footer {
 }
 .health-list .ok-dot { color: var(--green); }
 .health-list .err-dot { color: var(--red); }
+.health-list .skip-dot { color: var(--yellow); }
 .health-list .muted { color: var(--text-muted); }
 
 code {

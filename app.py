@@ -1302,20 +1302,104 @@ _API_CHECKS = [
 ]
 
 
+# --- /api/health: bounded, so it can never kill its own worker ---------------
+#
+# /api/health re-runs every API endpoint in-process (test_client), including the
+# networked ones (live arXiv search, the egress probe, and the research digest on
+# cache expiry). Their worst-case latency once summed to ~95s — over 3x
+# gunicorn's default 30s worker timeout — so a slow arXiv day would make a single
+# /api/health call (polled by /dashboard every 60s) exceed the timeout and
+# gunicorn would SIGKILL the worker mid-check. Two prongs make that impossible:
+#   1. A WALL-CLOCK BUDGET on the check loop: once the budget is spent, the
+#      remaining networked checks are reported as `skipped` (not run, not
+#      failed) so a health call can never approach the worker timeout.
+#   2. A per-worker SHORT-TTL CACHE for the networked probes: the dashboard's
+#      60s poll reuses the last probe result instead of re-hitting arXiv/google
+#      every time, so the slow path is rare (first call / TTL expiry) and the
+#      recurring cost is sub-second.
+# The arXiv per-fetch socket timeout was also lowered 15s -> 5s (research.py) so
+# a single in-flight check — the cold digest, the one check that can be slow by
+# itself — is hard-bounded under the budget. urllib's socket timeout is a hard
+# limit, so a fully-down arXiv cannot push one check past 5s per category.
+_API_HEALTH_BUDGET_SECONDS = 20   # hard cap on one /api/health call (< gunicorn 30s)
+_HEALTH_PROBE_TTL_SECONDS = 90    # how long a networked probe result is reused
+# The health checks that make an OUTBOUND network call when the health check
+# re-runs them in-process, matched by exact route string. Every endpoint that
+# reaches the internet (arXiv) or the platform (10.0.0.18 stats/notebook) is
+# here; everything else is in-process (git / file / JSONL) and always runs.
+# Caching them all means the dashboard's 60s poll reuses the last result instead
+# of re-hitting the network ~8 times per poll, and the budget protects against
+# any one of them (a dead arXiv, a hung internal host) holding a worker.
+_HEALTH_NETWORKED = {
+    "/api/stats",
+    "/api/network",
+    "/api/notebook",
+    "/api/research",
+    "/api/research/search?q=ai",
+    "/api/egress",
+    "/api/research/export?format=json",
+    "/api/research/search/export?q=ai&format=json",
+}
+# route -> (monotonic ts, item). Only OK networked results are cached; failures
+# are re-probed every call (they fail fast, so re-probing is cheap) so a
+# recovery is never hidden behind a cached green. Per-worker (each gunicorn
+# worker has its own), so no cross-user data and no lock needed.
+_HEALTH_PROBE_CACHE = {}
+
+
+def _health_reset_probe_cache():
+    """Clear the per-worker networked-probe cache (used by tests)."""
+    _HEALTH_PROBE_CACHE.clear()
+
+
 @app.route("/api/health")
 def api_health():
     """Self-verify every API endpoint: HTTP 200 + valid JSON + expected key/type,
     and (where flagged) a non-null payload. Returns per-endpoint status so a
-    broken endpoint is surfaced immediately instead of being assumed healthy."""
+    broken endpoint is surfaced immediately instead of being assumed healthy.
+
+    Bounded: a wall-clock budget caps the whole call, and the networked probes
+    are short-TTL cached, so this endpoint can never exceed the worker timeout
+    (see the comment above). A networked check the budget can't afford is
+    reported as `skipped`, not run — the degradation is visible data, not a
+    silent skip, and it does not flip `ok` (the API is not broken; the health
+    check just ran out of time)."""
+    import time as _time
     results = []
     healthy = True
+    skipped = 0
+    budget_exceeded = False
+    t_start = _time.monotonic()
     with app.test_client() as client:
         for route, key, typ, non_null in _API_CHECKS:
             item = {"route": route, "ok": False, "status": None, "ms": None, "error": None}
+            is_net = route in _HEALTH_NETWORKED
+            # (2) Reuse a fresh networked probe result (the dashboard's 60s poll).
+            if is_net:
+                hit = _HEALTH_PROBE_CACHE.get(route)
+                if hit and (_time.monotonic() - hit[0]) < _HEALTH_PROBE_TTL_SECONDS:
+                    cached_item = dict(hit[1])
+                    cached_item["cached"] = True
+                    results.append(cached_item)
+                    if not cached_item["ok"]:
+                        healthy = False
+                    continue
+                # (1) Wall-clock budget: don't START a networked check we can't
+                # finish in time. (A check already in-flight runs to completion —
+                # it can't be interrupted — but the lowered socket timeouts keep
+                # that bounded, so the in-flight + overhead stays under 30s.)
+                if (_time.monotonic() - t_start) > _API_HEALTH_BUDGET_SECONDS:
+                    item["error"] = ("skipped: /api/health time budget exceeded "
+                                     "(not verified this pass)")
+                    item["skipped"] = True
+                    results.append(item)
+                    skipped += 1
+                    budget_exceeded = True
+                    continue
             try:
-                t0 = datetime.datetime.now()
+                t0 = _time.monotonic()
                 resp = client.get(route)
-                item["ms"] = int((datetime.datetime.now() - t0).total_seconds() * 1000)
+                item["ms"] = int((_time.monotonic() - t0) * 1000)
                 item["status"] = resp.status_code
                 data = resp.get_json(silent=True)
                 if resp.status_code != 200:
@@ -1332,15 +1416,25 @@ def api_health():
                     item["ok"] = True
             except Exception as e:  # noqa: BLE001
                 item["error"] = f"{type(e).__name__}: {e}"
+            # Cache a successful networked probe so the next poll reuses it.
+            if is_net and item["ok"]:
+                _HEALTH_PROBE_CACHE[route] = (_time.monotonic(), dict(item))
             results.append(item)
             if not item["ok"]:
                 healthy = False
 
+    wall_ms = int((_time.monotonic() - t_start) * 1000)
     return jsonify({
         "ok": healthy,
         "checked": len(results),
         "passed": sum(1 for r in results if r["ok"]),
-        "failed": sum(1 for r in results if not r["ok"]),
+        # `failed` counts checks that RAN and failed; skipped (budget) and
+        # cached (ok) checks are not failures.
+        "failed": sum(1 for r in results if (not r["ok"]) and not r.get("skipped")),
+        "skipped": skipped,
+        "budget_exceeded": budget_exceeded,
+        "wall_ms": wall_ms,
+        "budget_ms": _API_HEALTH_BUDGET_SECONDS * 1000,
         "endpoints": results,
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })

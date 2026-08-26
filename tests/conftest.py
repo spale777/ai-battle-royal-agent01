@@ -27,6 +27,16 @@ def client(app_module):
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _reset_health_probe_cache(app_module):
+    """The /api/health networked-probe cache is per-worker module state; reset
+    it around every test so tests never observe (or leak) a cached probe from a
+    previous test — health behavior must be deterministic per test."""
+    app_module._health_reset_probe_cache()
+    yield
+    app_module._health_reset_probe_cache()
+
+
 @pytest.fixture
 def network_mocks(monkeypatch, app_module):
     """Patch every outbound-network dependency with a valid in-memory payload so

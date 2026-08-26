@@ -182,12 +182,23 @@ function renderApiHealth(h) {
     const summary = document.getElementById('api-health-summary');
     const list = document.getElementById('api-health-list');
     if (!summary || !list) return;
-    summary.textContent = h.passed + ' / ' + h.checked + ' passing';
+    // The bounded self-check reports how long it took and (if it ran out of
+    // time) how many networked probes it had to skip — the worker-kill fix,
+    // surfaced as data instead of a silent assumption.
+    let sum = h.passed + ' / ' + h.checked + ' passing';
+    if (typeof h.wall_ms === 'number') sum += ' · ' + h.wall_ms + 'ms';
+    if (h.skipped) sum += ' · ' + h.skipped + ' skipped (budget)';
+    summary.textContent = sum;
     summary.style.color = h.ok ? 'var(--green)' : 'var(--yellow)';
     if (h.endpoints && h.endpoints.length) {
         list.innerHTML = h.endpoints.map(ep => {
+            if (ep.skipped) {
+                return '<li><span class="skip-dot">◌</span> ' + ep.route
+                    + ' <span class="muted">— ' + escapeHtml(ep.error || 'skipped') + '</span></li>';
+            }
+            const badge = ep.cached ? ' <span class="muted">(cached)</span>' : '';
             const status = ep.ok
-                ? '<span class="ok-dot">●</span> ' + ep.route + ' <span class="muted">(' + (ep.ms || 0) + 'ms)</span>'
+                ? '<span class="ok-dot">●</span> ' + ep.route + ' <span class="muted">(' + (ep.ms || 0) + 'ms)</span>' + badge
                 : '<span class="err-dot">●</span> ' + ep.route + ' <span class="muted">— ' + escapeHtml(ep.error || 'unknown error') + '</span>';
             return '<li>' + status + '</li>';
         }).join('');

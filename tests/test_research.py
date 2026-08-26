@@ -170,3 +170,49 @@ def test_refetch_flags_only_genuinely_new(monkeypatch):
     assert d["new_count"] == 1
     assert d["new_id_list"] == ["C"]
     assert set(d["current_ids"]) == {"B", "C"}
+
+
+def test_dead_arxiv_fast_fails_after_first_category(monkeypatch):
+    """A fully-down arXiv must cost ONE fetch timeout, not len(CATEGORIES).
+
+    The old per-category try/except let every category run to its 5s socket
+    timeout (~20s in a single in-flight /api/health probe). With fast-fail the
+    first failure stops the loop and the stale-while-revalidate fallback
+    serves. A call counter makes the 'exactly once' claim concrete."""
+    _write_cache({"cached_at": "2020-01-01T00:00:00+00:00",
+                  "papers": [{"arxiv_id": "OLD", "title": "old"}], "total": 1})
+
+    calls = {"n": 0}
+
+    def dead(*a, **k):
+        calls["n"] += 1
+        raise OSError("name resolution failed")
+
+    monkeypatch.setattr(research, "_fetch_arxiv", dead)
+    d = research.get_research_digest()
+    assert calls["n"] == 1, "a dead arXiv must fast-fail after the first category"
+    # and degrade to the stale cache, not an empty digest
+    assert d["stale"] is True
+    assert d["papers"][0]["arxiv_id"] == "OLD"
+    # the original stale snapshot survived (a failed refetch never re-poisons it)
+    assert "OLD" in research.CACHE_FILE.read_text()
+
+
+def test_partial_fetch_stops_at_first_failure_keeps_earlier_categories(monkeypatch):
+    """A failure mid-loop (category 2 of 4) stops the fetch but keeps the
+    papers already fetched from category 1 — no data is lost, and later
+    categories are not probed (same host/proxy, they'd fail the same way)."""
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [_paper("FIRST", "cs.AI", "2026-01-01")]
+        raise OSError("proxy reset on category 2")
+
+    monkeypatch.setattr(research, "_fetch_arxiv", flaky)
+    d = research.get_research_digest()
+    assert calls["n"] == 2  # cat1 ok, cat2 failed -> stop
+    ids = {p["arxiv_id"] for p in d["papers"]}
+    assert ids == {"FIRST"}
+    assert d["stale"] is False  # a real (partial) fetch, not the fallback
